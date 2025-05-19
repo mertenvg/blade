@@ -77,7 +77,7 @@ type Watch struct {
 	stop context.CancelFunc
 }
 
-func (w Watch) Start(action func()) {
+func (w *Watch) Start(action func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.stop = cancel
 
@@ -126,8 +126,8 @@ func (w Watch) Start(action func()) {
 	}(ctx, action)
 }
 
-func (w Watch) Stop() {
-	if w.stop != nil {
+func (w *Watch) Stop() {
+	if w != nil && w.stop != nil {
 		w.stop()
 	}
 }
