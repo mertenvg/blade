@@ -16,7 +16,6 @@ type IgnoreList struct {
 
 func (il *IgnoreList) ShouldIgnore(path string) bool {
 	for _, regex := range il.regexes {
-		fmt.Println(path, regex.String(), regex.MatchString(path))
 		if regex.MatchString(path) {
 			return true
 		}
@@ -31,7 +30,6 @@ func NewIgnoreList(paths []string) *IgnoreList {
 		p = strings.ReplaceAll(p, `\*\*`, `[\w\-. \/\\]+`)
 		p = strings.ReplaceAll(p, `\*`, `[\w\-. ]+`)
 		pattern := fmt.Sprintf("^%s$", p)
-		fmt.Println(pattern)
 		regex := regexp.MustCompile(pattern)
 		regexes[i] = regex
 	}
