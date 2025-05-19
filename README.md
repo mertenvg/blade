@@ -1,6 +1,12 @@
 # blade
 A runner for your dev env with file watching and support for multiple services in the same repository
 
+## install
+```shell
+go install github.com/mertenvg/blade@latest
+```
+You'll need to make sure your `$GOPATH/bin` is in your `$PATH`
+
 ## usage
 ```shell
 blade run
