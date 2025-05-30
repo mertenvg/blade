@@ -103,6 +103,7 @@ func (w *Watch) Start(action func()) {
 
 	// first run do nothing
 	watchers.Scan()
+	watchers.Reset()
 
 	go func(ctx context.Context, action func()) {
 		ticker := time.NewTicker(time.Second)
