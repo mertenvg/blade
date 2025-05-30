@@ -132,6 +132,7 @@ func (s *Service) start(cmd string) error {
 				return
 			}
 
+			time.Sleep(250 * time.Millisecond)
 			s.restart = false
 		}
 	}(s, cmd)
