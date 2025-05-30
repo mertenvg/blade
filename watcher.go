@@ -184,6 +184,10 @@ func (fs *FSWatcher) Scan() {
 		}
 		fs.children = children
 	}
+
+	if fs.isChanged {
+		colorterm.Debug(fs.path, "changed")
+	}
 }
 
 func (fs *FSWatcher) HasChanged() bool {
