@@ -115,6 +115,7 @@ func (s *Service) start(cmd string) error {
 
 			if s.DNR && !s.restart {
 				colorterm.Warning(s.Name, "restart prevented by DNR")
+				s.cmd = nil
 				return
 			}
 
