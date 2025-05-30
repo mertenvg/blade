@@ -29,16 +29,17 @@ type Service struct {
 	restart   bool
 	startedAt time.Time
 
-	Name       string     `yaml:"name"`
-	Watch      *Watch     `yaml:"watch"`
-	InheritEnv bool       `yaml:"inheritEnv"`
-	Env        []EnvValue `yaml:"env"`
-	Before     string     `yaml:"before"`
-	Run        string     `yaml:"run"`
-	DNR        bool       `yaml:"dnr"`
-	Skip       bool       `yaml:"skip"`
-	Dir        string     `yaml:"dir"`
-	Output     Output     `yaml:"output"`
+	Name         string     `yaml:"name"`
+	Watch        *Watch     `yaml:"watch"`
+	InheritEnv   bool       `yaml:"inheritEnv"`
+	Env          []EnvValue `yaml:"env"`
+	Before       string     `yaml:"before"`
+	Run          string     `yaml:"run"`
+	DNR          bool       `yaml:"dnr"`
+	Skip         bool       `yaml:"skip"`
+	Dir          string     `yaml:"dir"`
+	Output       Output     `yaml:"output"`
+	RestartDelay int        `yaml:"restartDelayMS"`
 }
 
 func (s *Service) Start() {
@@ -122,7 +123,6 @@ func (s *Service) start(cmd string) error {
 				} else {
 					colorterm.Error(s.Name, "error waiting for command:", err)
 				}
-
 			} else {
 				colorterm.Info(s.Name, "ended")
 			}
@@ -132,7 +132,9 @@ func (s *Service) start(cmd string) error {
 				return
 			}
 
-			time.Sleep(250 * time.Millisecond)
+			if s.RestartDelay > 0 {
+				time.Sleep(time.Duration(s.RestartDelay) * time.Millisecond)
+			}
 			s.restart = false
 		}
 	}(s, cmd)
