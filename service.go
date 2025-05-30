@@ -17,10 +17,10 @@ type EnvValue struct {
 }
 
 type Service struct {
-	wg      sync.WaitGroup
-	cmd     *exec.Cmd
-	restart bool
-	started time.Time
+	wg        sync.WaitGroup
+	cmd       *exec.Cmd
+	restart   bool
+	startedAt time.Time
 
 	Name       string     `yaml:"name"`
 	Watch      *Watch     `yaml:"watch"`
@@ -59,19 +59,27 @@ func (s *Service) Restart() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
-	s.restart = true
-	if err := s.stop(); err != nil {
-		colorterm.Error(s.Name, "couldn't stop with error:", err)
-		return
+	if s.cmd != nil {
+		s.restart = true
+		if err := s.stop(); err != nil {
+			colorterm.Error(s.Name, "couldn't stop with error:", err)
+			return
+		}
+	} else {
+		if err := s.start(s.Run); err != nil {
+			colorterm.Error(s.Name, "failed to restart with error:", err)
+			return
+		}
 	}
+
 }
 
-func (s *Service) Stop() {
+func (s *Service) Exit() {
 	s.Watch.Stop()
 	s.DNR = true
-	colorterm.Info(s.Name, "stopping")
+	colorterm.Info(s.Name, "exiting")
 	if err := s.stop(); err != nil {
-		colorterm.Error(s.Name, "couldn't stop service with error:", err)
+		colorterm.Error(s.Name, "couldn't exit with error:", err)
 		return
 	}
 }
@@ -94,7 +102,7 @@ func (s *Service) start(cmd string) error {
 				return
 			}
 
-			s.started = time.Now()
+			s.startedAt = time.Now()
 			s.cmd = c
 
 			colorterm.Success(s.Name, "running", fmt.Sprintf("(pid:%d)", s.cmd.Process.Pid))

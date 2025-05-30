@@ -40,7 +40,7 @@ func main() {
 		if r := recover(); r != nil {
 			colorterm.Error(r)
 			for _, s := range conf {
-				s.Stop()
+				s.Exit()
 			}
 			os.Exit(1)
 		}
@@ -118,7 +118,7 @@ func main() {
 					if state != "<nil>" {
 						colorterm.Error(s.Name, pid, state)
 					} else {
-						state = fmt.Sprintf("OK %s", time.Now().Sub(s.started).Round(time.Second))
+						state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
 						colorterm.Success(s.Name, pid, state)
 					}
 				}
@@ -133,7 +133,7 @@ func main() {
 	colorterm.Warning("shutting down...")
 
 	for _, s := range conf {
-		s.Stop()
+		s.Exit()
 	}
 
 	wg.Wait()
