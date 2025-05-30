@@ -17,6 +17,12 @@ type EnvValue struct {
 	Value *string `yaml:"value,omitempty"`
 }
 
+type Output struct {
+	Stdout string `yaml:"stdout"`
+	Stderr string `yaml:"stderr"`
+	Stdin  string `yaml:"stdin"`
+}
+
 type Service struct {
 	wg        sync.WaitGroup
 	cmd       *exec.Cmd
@@ -31,6 +37,8 @@ type Service struct {
 	Run        string     `yaml:"run"`
 	DNR        bool       `yaml:"dnr"`
 	Skip       bool       `yaml:"skip"`
+	Dir        string     `yaml:"dir"`
+	Output     Output     `yaml:"output"`
 }
 
 func (s *Service) Start() {
@@ -149,9 +157,19 @@ func (s *Service) parse(cmd string) *exec.Cmd {
 	args := parts[1:]
 
 	c := exec.Command(name, args...)
-	c.Dir = "."
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Dir = coalesce(s.Dir, ".")
+
+	if s.Output.Stdout == "os" {
+		c.Stdout = os.Stdout
+	}
+
+	if s.Output.Stderr == "os" {
+		c.Stderr = os.Stderr
+	}
+
+	if s.Output.Stdin != "os" {
+		c.Stdin = os.Stdin
+	}
 
 	if !s.InheritEnv {
 		c.Env = []string{}
@@ -175,4 +193,13 @@ func (s *Service) stop() error {
 		}
 	}
 	return nil
+}
+
+func coalesce(strs ...string) string {
+	for _, str := range strs {
+		if str != "" {
+			return str
+		}
+	}
+	return ""
 }
