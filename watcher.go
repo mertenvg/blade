@@ -116,14 +116,14 @@ func (w *Watch) Start(action func()) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				if watchers.HasChanged() {
-					timer.Stop()
-					watchers.Reset()
-					timer.Reset(time.Second)
-				}
 			case <-timer.C:
 				action()
+			case <-ticker.C:
+				watchers.Scan()
+				if watchers.HasChanged() {
+					timer.Reset(time.Second)
+					watchers.Reset()
+				}
 			}
 		}
 	}(ctx, action)
@@ -133,6 +133,13 @@ func (w *Watch) Stop() {
 	if w != nil && w.stop != nil {
 		w.stop()
 	}
+}
+
+func statEqual(a, b os.FileInfo) bool {
+	if a == nil || b == nil {
+		return (a == nil) == (b == nil)
+	}
+	return a.Size() == b.Size() && a.ModTime() == b.ModTime()
 }
 
 type FSWatcher struct {
@@ -156,8 +163,12 @@ func (fs *FSWatcher) Scan() {
 	stat, err := os.Stat(fs.path)
 	if err != nil {
 		colorterm.Error(fs.path, err)
+		return
 	}
-	fs.isChanged = fs.stat != nil && (stat.Size() != fs.stat.Size() || (!stat.IsDir() && stat.ModTime() != fs.stat.ModTime()))
+
+	if !stat.IsDir() {
+		fs.isChanged = !statEqual(fs.stat, stat)
+	}
 	fs.stat = stat
 
 	if stat.IsDir() {
@@ -179,6 +190,7 @@ func (fs *FSWatcher) Scan() {
 				fs.isChanged = true
 			}
 			children = append(children, w)
+			w.Scan()
 		}
 		if len(children) != len(fs.children) {
 			fs.isChanged = true
@@ -192,7 +204,6 @@ func (fs *FSWatcher) Scan() {
 }
 
 func (fs *FSWatcher) HasChanged() bool {
-	fs.Scan()
 	if fs.isChanged {
 		return true
 	}
