@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,9 +49,8 @@ func (s *Service) Start() {
 }
 
 func (s *Service) Wait() {
-	colorterm.Info(s.Name, "waiting")
 	s.wg.Wait()
-	colorterm.Warning(s.Name, "done waiting")
+	colorterm.Success(s.Name, "finished")
 }
 
 func (s *Service) Restart() {
@@ -108,13 +108,18 @@ func (s *Service) start(cmd string) error {
 			colorterm.Success(s.Name, "running", fmt.Sprintf("(pid:%d)", s.cmd.Process.Pid))
 			err := c.Wait()
 			if err != nil && err.Error() != "signal: killed" {
-				colorterm.Error(s.Name, "ended with error:", err)
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					colorterm.Error(s.Name, "ended with error:", err)
+				} else {
+					colorterm.Error(s.Name, "error waiting for command:", err)
+				}
+
 			} else {
 				colorterm.Info(s.Name, "ended")
 			}
 
 			if s.DNR && !s.restart {
-				colorterm.Warning(s.Name, "restart prevented by DNR")
 				s.cmd = nil
 				return
 			}
@@ -147,7 +152,6 @@ func (s *Service) parse(cmd string) *exec.Cmd {
 	c.Dir = "."
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	c.Stdin = os.Stdin
 
 	if !s.InheritEnv {
 		c.Env = []string{}
