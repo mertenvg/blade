@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/mertenvg/blade/pkg/colorterm"
 )
 
 type IgnoreList struct {
@@ -87,11 +89,11 @@ func (w *Watch) Start(action func()) {
 		ignore := NewIgnoreList(w.FS.Ignore)
 		if w.FS.Path != nil {
 			watchers = append(watchers, &FSWatcher{path: *w.FS.Path, ignore: ignore})
-			fmt.Println("watching", *w.FS.Path)
+			colorterm.Info("watching", *w.FS.Path)
 		}
 		for _, p := range w.FS.Paths {
 			watchers = append(watchers, &FSWatcher{path: p, ignore: ignore})
-			fmt.Println("watching", p)
+			colorterm.Info("watching", p)
 		}
 	}
 
@@ -152,7 +154,7 @@ func (fs *FSWatcher) Scan() {
 
 	stat, err := os.Stat(fs.path)
 	if err != nil {
-		fmt.Println(fs.path, err)
+		colorterm.Error(fs.path, err)
 	}
 	fs.isChanged = fs.stat != nil && (stat.Size() != fs.stat.Size() || (!stat.IsDir() && stat.ModTime() != fs.stat.ModTime()))
 	fs.stat = stat
@@ -164,7 +166,7 @@ func (fs *FSWatcher) Scan() {
 		}
 		files, err := os.ReadDir(fs.path)
 		if err != nil {
-			fmt.Println(fs.path, err)
+			colorterm.Error(fs.path, err)
 			return
 		}
 		var children []*FSWatcher

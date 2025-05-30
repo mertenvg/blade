@@ -7,14 +7,17 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mertenvg/blade/pkg/colorterm"
 )
 
 func main() {
 	b, err := os.ReadFile("./blade.yaml")
 	if err != nil {
-		fmt.Println("Couldn't load config file blade.yaml", err)
+		colorterm.Error("Couldn't load config file blade.yaml", err)
 		os.Exit(1)
 	}
 
@@ -22,7 +25,7 @@ func main() {
 
 	err = yaml.Unmarshal(b, &conf)
 	if err != nil {
-		fmt.Println("Couldn't parse yaml from blade.yaml", err)
+		colorterm.Error("Couldn't parse yaml from blade.yaml", err)
 		os.Exit(1)
 	}
 
@@ -32,6 +35,16 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+
+	defer func() {
+		if r := recover(); r != nil {
+			colorterm.Error(r)
+			for _, s := range conf {
+				s.Stop()
+			}
+			os.Exit(1)
+		}
+	}()
 
 	args := os.Args
 	if len(args) > 1 {
@@ -44,13 +57,17 @@ func main() {
 				for _, name := range args[2:] {
 					s, ok := services[name]
 					if !ok {
-						fmt.Println("Couldn't find service", name)
+						colorterm.Error("Couldn't find service", name)
 						os.Exit(1)
 					}
 					run = append(run, s)
 				}
 			} else {
 				for _, s := range conf {
+					if s.Skip {
+						colorterm.Debug(s.Name, "skipping")
+						continue
+					}
 					run = append(run, s)
 				}
 			}
@@ -66,19 +83,54 @@ func main() {
 		}
 
 	} else {
-		fmt.Println("Services available:")
+		colorterm.Info("Services available:")
 		for _, s := range conf {
-			fmt.Println(" -", s.Name)
+			colorterm.Info(" -", s.Name)
 		}
-		fmt.Println("Usage: blade run")
-		fmt.Println("Or: blade run <service-name-1> <service-name-2> <service-name-n>...")
+		colorterm.None("Usage: blade run")
+		colorterm.None("Or: blade run <service-name-1> <service-name-2> <service-name-n>...")
+		return
 	}
+
+	info := make(chan os.Signal, 1)
+	signal.Notify(info, syscall.SIGINFO)
 
 	// Wait for interrupt or term signal from OS
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	<-ctx.Done()
-	fmt.Println("shutting down...")
+
+	done := make(chan struct{}, 1)
+
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-info:
+				for _, s := range conf {
+					state := "not running"
+					pid := "()"
+					if s.cmd != nil {
+						state = s.cmd.ProcessState.String()
+						pid = fmt.Sprintf("(%d)", s.cmd.Process.Pid)
+					}
+					if state != "<nil>" {
+						colorterm.Error(s.Name, pid, state)
+					} else {
+						state = fmt.Sprintf("OK %s", time.Now().Sub(s.started).Round(time.Second))
+						colorterm.Success(s.Name, pid, state)
+					}
+				}
+			}
+		}
+	}()
+
+	<-done
+
+	close(info)
+
+	colorterm.Warning("shutting down...")
 
 	for _, s := range conf {
 		s.Stop()
