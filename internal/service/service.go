@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mertenvg/blade/internal/service/watcher"
@@ -84,7 +85,8 @@ func (s *S) Exit() {
 	s.stop()
 }
 
-func (s *S) Status() (string, string) {
+func (s *S) Status() (bool, string, string) {
+	active := false
 	state := "not running"
 	pid := "()"
 	if s.state != "" {
@@ -92,8 +94,19 @@ func (s *S) Status() (string, string) {
 	}
 	if s.pid != 0 {
 		pid = fmt.Sprintf("(%d)", s.pid)
+		p := s.process()
+		if p != nil {
+			err := p.Signal(syscall.Signal(0))
+			if err == nil {
+				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).String())
+				active = true
+			}
+			if err != nil {
+				state = err.Error()
+			}
+		}
 	}
-	return state, pid
+	return active, state, pid
 }
 
 func (s *S) start(cmd string) error {
@@ -251,12 +264,12 @@ func (s *S) process() *os.Process {
 }
 
 func (s *S) getpid(assume int) int {
-	pidFilePath := filepath.Join(s.Dir, fmt.Sprintf("%d.pid", s.Name))
+	pidFilePath := filepath.Join(s.Dir, fmt.Sprintf(".%s.pid", s.Name))
 	_, err := os.Stat(pidFilePath)
 	if err != nil {
 		return assume
 	}
-	text, err := os.ReadFile(filepath.Join(s.Dir, fmt.Sprintf("%s.pid", s.Name)))
+	text, err := os.ReadFile(pidFilePath)
 	if err != nil {
 		return assume
 	}

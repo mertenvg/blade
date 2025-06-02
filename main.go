@@ -108,11 +108,11 @@ func main() {
 				return
 			case <-info:
 				for _, s := range conf {
-					state, pid := s.Status()
-					if pid == "()" {
-						colorterm.Error(s.Name, pid, state)
-					} else {
+					active, state, pid := s.Status()
+					if active {
 						colorterm.Success(s.Name, pid, state)
+					} else {
+						colorterm.Error(s.Name, pid, state)
 					}
 				}
 			}
