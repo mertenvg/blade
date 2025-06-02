@@ -98,7 +98,7 @@ func (s *S) Status() (bool, string, string) {
 		if p != nil {
 			err := p.Signal(syscall.Signal(0))
 			if err == nil {
-				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).String())
+				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second).String())
 				active = true
 			}
 			if err != nil {
@@ -152,7 +152,7 @@ func (s *S) start(cmd string) error {
 			p := s.process()
 
 			ps, err := p.Wait()
-			if err != nil && err.Error() != "signal: killed" {
+			if err != nil && err.Error() != "signal: killed" && err.Error() != "wait: no child processes" {
 				var exitErr *exec.ExitError
 				if errors.As(err, &exitErr) {
 					colorterm.Error(s.Name, "ended with error:", err)
@@ -241,14 +241,14 @@ func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 }
 
 func (s *S) stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	proc := s.process()
 	if proc != nil {
 		if err := proc.Kill(); err != nil {
 			colorterm.Error(s.Name, "failed to kill process:", err)
 		}
-	}
-	if s.cancel != nil {
-		s.cancel()
 	}
 }
 
