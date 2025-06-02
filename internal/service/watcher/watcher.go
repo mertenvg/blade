@@ -1,4 +1,4 @@
-package main
+package watcher
 
 import (
 	"context"
@@ -73,13 +73,13 @@ type FSWatcherConfig struct {
 	Ignore []string `yaml:"ignore,omitempty"`
 }
 
-type Watch struct {
+type W struct {
 	FS *FSWatcherConfig `yaml:"fs"`
 
 	stop context.CancelFunc
 }
 
-func (w *Watch) Start(action func()) {
+func (w *W) Start(action func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.stop = cancel
 
@@ -129,7 +129,7 @@ func (w *Watch) Start(action func()) {
 	}(ctx, action)
 }
 
-func (w *Watch) Stop() {
+func (w *W) Stop() {
 	if w != nil && w.stop != nil {
 		w.stop()
 	}

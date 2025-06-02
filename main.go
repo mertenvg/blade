@@ -2,15 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mertenvg/blade/internal/service"
 	"github.com/mertenvg/blade/pkg/colorterm"
 )
 
@@ -21,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var conf []*Service
+	var conf []*service.S
 
 	err = yaml.Unmarshal(b, &conf)
 	if err != nil {
@@ -29,7 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	services := make(map[string]*Service)
+	services := make(map[string]*service.S)
 	for _, s := range conf {
 		services[s.Name] = s
 	}
@@ -52,7 +51,7 @@ func main() {
 		action := args[1]
 		switch action {
 		case "run":
-			var run []*Service
+			var run []*service.S
 			if len(args) > 2 {
 				for _, name := range args[2:] {
 					s, ok := services[name]
@@ -75,7 +74,7 @@ func main() {
 			for _, s := range run {
 				wg.Add(1)
 				s.Start()
-				go func(s *Service) {
+				go func(s *service.S) {
 					s.Wait()
 					wg.Done()
 				}(s)
@@ -109,16 +108,10 @@ func main() {
 				return
 			case <-info:
 				for _, s := range conf {
-					state := "not running"
-					pid := "()"
-					if s.cmd != nil {
-						state = s.cmd.ProcessState.String()
-						pid = fmt.Sprintf("(%d)", s.cmd.Process.Pid)
-					}
-					if state != "<nil>" {
+					state, pid := s.Status()
+					if pid == "()" {
 						colorterm.Error(s.Name, pid, state)
 					} else {
-						state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
 						colorterm.Success(s.Name, pid, state)
 					}
 				}
