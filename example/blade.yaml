@@ -1,26 +1,3 @@
-# blade
-A runner for your dev env with file watching and support for multiple services in the same repository (mono-repo).
-
-## install
-```shell
-go install github.com/mertenvg/blade@latest
-```
-You'll need to make sure your `$GOPATH/bin` is in your `$PATH`.
-
-## usage
-```shell
-blade run
-# or
-blade run service-name-1 service-name-2 service-name-n...
-```
-This will read configuration from the blade.yaml file in the current working directory.
-
-## configuration (blade.yaml)
-Blade uses a configuration structure to know what services you have, how to run them, and what files to watch to reload the application.
-The minimum required configuration for each service is a `name` and a `run` command.
-```yaml
-# example/blade.yaml
-#
 - name: service-one
   watch:
     fs:
@@ -98,7 +75,3 @@ The minimum required configuration for each service is a `name` and a `run` comm
   output:
     stdout: os
     stderr: os
-```
-
-## todo
-* Allow tags to be added to services in the blade.yaml configuration so that we can filter which services to start up when blade is run.
