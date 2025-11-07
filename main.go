@@ -29,8 +29,12 @@ func main() {
 	}
 
 	services := make(map[string]*service.S)
+	groups := make(map[string][]*service.S)
 	for _, s := range conf {
 		services[s.Name] = s
+		if s.Group != "" {
+			groups[s.Group] = append(groups[s.Group], s)
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -53,13 +57,27 @@ func main() {
 		case "run":
 			var run []*service.S
 			if len(args) > 2 {
-				for _, name := range args[2:] {
-					s, ok := services[name]
-					if !ok {
-						colorterm.Error("Couldn't find service", name)
-						os.Exit(1)
+				// allow selecting by service name or group name
+				added := make(map[string]struct{})
+				for _, token := range args[2:] {
+					if s, ok := services[token]; ok {
+						if _, seen := added[s.Name]; !seen {
+							run = append(run, s)
+							added[s.Name] = struct{}{}
+						}
+						continue
 					}
-					run = append(run, s)
+					if gs, ok := groups[token]; ok {
+						for _, s := range gs {
+							if _, seen := added[s.Name]; !seen {
+								run = append(run, s)
+								added[s.Name] = struct{}{}
+							}
+						}
+						continue
+					}
+					colorterm.Error("Couldn't find service or group", token)
+					os.Exit(1)
 				}
 			} else {
 				for _, s := range conf {
@@ -86,8 +104,14 @@ func main() {
 		for _, s := range conf {
 			colorterm.Info(" -", s.Name)
 		}
+		if len(groups) > 0 {
+			colorterm.Info("Groups available:")
+			for g := range groups {
+				colorterm.Info(" -", g)
+			}
+		}
 		colorterm.None("Usage: blade run")
-		colorterm.None("Or: blade run <service-name-1> <service-name-2> <service-name-n>...")
+		colorterm.None("Or: blade run <service-or-group> [<service-or-group> ...]")
 		return
 	}
 
