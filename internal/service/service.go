@@ -37,7 +37,7 @@ type S struct {
 	pid       int
 
 	Name       string     `yaml:"name"`
-	Group      string     `yaml:"group"`
+	Tags       []string   `yaml:"tags"`
 	Watch      *watcher.W `yaml:"watch"`
 	InheritEnv bool       `yaml:"inheritEnv"`
 	Env        []EnvValue `yaml:"env"`

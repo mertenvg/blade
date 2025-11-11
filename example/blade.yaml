@@ -1,5 +1,6 @@
 - name: service-one
-  group: service
+  tags:
+    - service
   watch:
     fs:
       path: cmd/service-one/
@@ -26,7 +27,8 @@
     stderr: os
 
 - name: service-two
-  group: service
+  tags:
+    - service
   inheritEnv: true
   env:
     - name: VAR_3
@@ -46,7 +48,9 @@
     stderr: os
 
 - name: random-exit
-  group: random
+  tags:
+    - service
+    - random
   inheritEnv: true
   run: go run cmd/random-exit/main.go
   output:
@@ -54,7 +58,9 @@
     stderr: os
 
 - name: random-panic
-  group: random
+  tags:
+    - service
+    - random
   inheritEnv: true
   run: go run cmd/random-panic/main.go
   output:

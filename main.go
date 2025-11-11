@@ -32,8 +32,10 @@ func main() {
 	groups := make(map[string][]*service.S)
 	for _, s := range conf {
 		services[s.Name] = s
-		if s.Group != "" {
-			groups[s.Group] = append(groups[s.Group], s)
+		if len(s.Tags) > 0 {
+			for _, t := range s.Tags {
+				groups[t] = append(groups[t], s)
+			}
 		}
 	}
 
@@ -98,20 +100,19 @@ func main() {
 				}(s)
 			}
 		}
-
 	} else {
 		colorterm.Info("Services available:")
 		for _, s := range conf {
 			colorterm.Info(" -", s.Name)
 		}
 		if len(groups) > 0 {
-			colorterm.Info("Groups available:")
+			colorterm.Info("Tags available:")
 			for g := range groups {
 				colorterm.Info(" -", g)
 			}
 		}
 		colorterm.None("Usage: blade run")
-		colorterm.None("Or: blade run <service-or-group> [<service-or-group> ...]")
+		colorterm.None("Or: blade run <name-or-tag> [<name-or-tag> ...]")
 		return
 	}
 

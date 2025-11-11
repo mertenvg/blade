@@ -25,7 +25,7 @@ Blade is a small CLI you install with Go. In each repository, you define service
 ## Installation
 ```bash
 go install github.com/mertenvg/blade@latest
-```
+``` 
 Make sure `$GOPATH/bin` (or your Go bin dir, typically `$HOME/go/bin`) is on your `$PATH`.
 
 Alternatively, build locally from source:
@@ -185,7 +185,6 @@ This project is licensed under the terms of the license in `LICENSE`.
 
 
 ## Roadmap / TODO
-- [ ] Allow tags per service in `blade.yaml` to filter by tag when running (from original TODO)
+- [x] Allow tags per service in `blade.yaml` to filter by tag when running (from original TODO)
 - [ ] Document Windows support and SIGINFO behavior across platforms
 - [ ] Add unit and integration tests
-- [ ] Consider richer output routing and JSON logs
