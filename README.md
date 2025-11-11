@@ -187,4 +187,4 @@ This project is licensed under the terms of the license in `LICENSE`.
 ## Roadmap / TODO
 - [x] Allow tags per service in `blade.yaml` to filter by tag when running (from original TODO)
 - [ ] Document Windows support and SIGINFO behavior across platforms
-- [ ] Add unit and integration tests
+- [x] Add unit and integration tests
