@@ -1,0 +1,5 @@
+- name: random-panic
+  tags:
+    - service
+    - random
+  run: go run cmd/random-panic/main.go

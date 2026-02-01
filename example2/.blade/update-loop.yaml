@@ -1,0 +1,6 @@
+- name: update-loop
+  watch:
+    fs:
+      paths:
+        - cmd/update-loop
+  run: go run cmd/update-loop/main.go

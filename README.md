@@ -1,5 +1,5 @@
 # blade
-A developer-friendly process runner for monorepos and multi-service projects. It reads a `blade.yaml` file and:
+A developer-friendly process runner for monorepos and multi-service projects. It reads a `blade.yaml` file (or `.yaml` files in a `.blade` directory) and:
 - starts one or more services concurrently
 - watches files and restarts services on changes
 - forwards output to your terminal
@@ -26,7 +26,7 @@ Blade is a small CLI you install with Go. In each repository, you define service
 ```bash
 go install github.com/mertenvg/blade@latest
 ``` 
-Make sure `$GOPATH/bin` (or your Go bin dir, typically `$HOME/go/bin`) is on your `$PATH`.
+Make sure your Go bin dir, typically `$HOME/go/bin`, is on your `$PATH`.
 
 Alternatively, build locally from source:
 ```bash
@@ -44,7 +44,7 @@ blade run
 # run only selected services by name
 blade run service-one service-two
 ```
-Blade reads configuration from `./blade.yaml` in the current working directory. If arguments are provided, only the named services are run; otherwise, all non-skipped services are started.
+Blade reads configuration from `./blade.yaml` or `./.blade/*` in the current working directory. If arguments are provided, only the named services are run; otherwise, all non-skipped services are started.
 
 Signals and status:
 - Send SIGINT or SIGTERM (e.g., Ctrl+C) to gracefully stop all services.
@@ -54,39 +54,22 @@ Signals and status:
 
 
 ## Configuration (blade.yaml)
-Blade uses YAML to define services. Minimum per-service fields: `name` and `run`.
+Blade uses YAML to define services. Minimum per-service fields are: `name` and `run`.
 
-Example (see full example in `example/blade.yaml`):
+Example (see full examples in `example/blade.yaml` and `example2/.blade/*`):
 ```yaml
-- name: service-one
-  watch:
-    fs:
-      path: cmd/service-one/
-      ignore:
-        - node_modules
-        - .*
-        - "**/*_test.go"
-  env:
-    - name: VAR_1
-      value: VAL_1
-  before: echo "do something at first run"
-  run: go run cmd/service-one/main.go
-  output:
-    stdout: os
-    stderr: os
-
 - name: service-two
   inheritEnv: true
   env:
-    - name: VAR_3
-      value: VAL_3
+    - name: YOUR_VAR
+      value: "your value"
     - name: VAR_EMPTY_QUOTE
       value: ""
   watch:
     fs:
       paths:
-        - cmd/service-two/main.go
-  run: go run cmd/service-two/main.go
+        - example/cmd/service-one/main.go
+  run: go run example/cmd/service-one/main.go
   output:
     stdout: os
     stderr: os
@@ -185,6 +168,9 @@ This project is licensed under the terms of the license in `LICENSE`.
 
 
 ## Roadmap / TODO
-- [x] Allow tags per service in `blade.yaml` to filter by tag when running (from original TODO)
+- [x] Allow tags per service in `blade.yaml` to filter by tag when running
 - [ ] Document Windows support and SIGINFO behavior across platforms
 - [x] Add unit and integration tests
+- [ ] Add support for multiple yaml files in a single directory for larger configurations
+- [ ] Allow services to inherit from a parent configuration
+- [ ] Make values dynamic so environment variables can be used values using `{$VARIABLE_NAME}`

@@ -1,13 +1,32 @@
+#
+# Global configuration for all services
+#
+
+- name: *
+  watch:
+    fs:
+      ignore:
+        - node_modules
+        - .*
+        - "**/*_test.go"
+  inheritEnv: true
+  env:
+    - name: GLOBAL_VAR_1
+      value: GLOBAL_VAL_1
+  output:
+    stdout: os
+    stderr: os
+
+#
+# Individual service configurations
+#
+
 - name: service-one
   tags:
     - service
   watch:
     fs:
       path: cmd/service-one/
-      ignore:
-        - node_modules
-        - .*
-        - "**/*_test.go"
   env:
     - name: VAR_1
       value: VAL_1
@@ -22,14 +41,10 @@
       value:
   before: echo "do something at first run"
   run: go run cmd/service-one/main.go
-  output:
-    stdout: os
-    stderr: os
 
 - name: service-two
   tags:
     - service
-  inheritEnv: true
   env:
     - name: VAR_3
       value: VAL_3
@@ -43,45 +58,26 @@
       paths:
         - cmd/service-two/main.go
   run: go run cmd/service-two/main.go
-  output:
-    stdout: os
-    stderr: os
 
 - name: random-exit
   tags:
     - service
     - random
-  inheritEnv: true
   run: go run cmd/random-exit/main.go
-  output:
-    stdout: os
-    stderr: os
 
 - name: random-panic
   tags:
     - service
     - random
-  inheritEnv: true
   run: go run cmd/random-panic/main.go
-  output:
-    stdout: os
-    stderr: os
 
 - name: sigterm-duo
   skip: true
-  inheritEnv: true
   run: go run cmd/sigterm-duo/main.go
-  output:
-    stdout: os
-    stderr: os
 
 - name: update-loop
-  inheritEnv: true
   watch:
     fs:
       paths:
         - cmd/update-loop
   run: go run cmd/update-loop/main.go
-  output:
-    stdout: os
-    stderr: os

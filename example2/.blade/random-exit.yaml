@@ -1,0 +1,5 @@
+- name: random-exit
+  tags:
+    - service
+    - random
+  run: go run cmd/random-exit/main.go

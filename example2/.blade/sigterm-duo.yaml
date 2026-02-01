@@ -1,0 +1,3 @@
+- name: sigterm-duo
+  skip: true
+  run: go run cmd/sigterm-duo/main.go

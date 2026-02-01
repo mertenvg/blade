@@ -1,0 +1,18 @@
+#
+# Global configuration for all services
+#
+
+- name: *
+  watch:
+    fs:
+      ignore:
+        - node_modules
+        - .*
+        - "**/*_test.go"
+  inheritEnv: true
+  env:
+    - name: GLOBAL_VAR_1
+      value: GLOBAL_VAL_1
+  output:
+    stdout: os
+    stderr: os
