@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"github.com/mertenvg/grok"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,18 +19,110 @@ import (
 	"github.com/mertenvg/blade/pkg/colorterm"
 )
 
-func main() {
-	b, err := os.ReadFile("./blade.yaml")
+const RecursionLimit = 10
+
+var envVarValuePlaceholder = regexp.MustCompile(`\{\$([a-zA-Z_][a-zA-Z0-9_]*)}`)
+
+func ReadDirRecursive(dir string, depth int) []byte {
+	if depth > RecursionLimit {
+		colorterm.Warningf("recursion limit (%v) reached at '%s'", RecursionLimit, dir)
+		return nil
+	}
+	var buf bytes.Buffer
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		colorterm.Error("Couldn't load config file blade.yaml", err)
+		colorterm.Warningf("couldn't read from '%s': %w", dir, err)
+		return nil
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			data := ReadDirRecursive(filepath.Join(dir, e.Name()), depth+1)
+			if data != nil {
+				buf.Write(data)
+			}
+			continue
+		}
+		if !slices.Contains([]string{".yaml", ".yml"}, strings.ToLower(filepath.Ext(e.Name()))) {
+			// not a YAML file, skipping!
+			continue
+		}
+		buf.Write(TryFile(filepath.Join(dir, e.Name())))
+	}
+	return nil
+}
+
+func TryFile(path string) []byte {
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			colorterm.Warningf("Couldn't load config file '%s': %v", path, err)
+			return nil
+		}
+		if len(data) > 0 {
+			return append(data, '\n')
+		}
+		return nil
+	}
+	return nil
+}
+
+func LoadConfig() []byte {
+	if data := TryFile("./blade.yaml"); data != nil {
+		return data
+	}
+	if data := TryFile("./blade.yml"); data != nil {
+		return data
+	}
+	if data := ReadDirRecursive("./blade", 0); data != nil {
+		return data
+	}
+	return nil
+}
+
+func InheritRecursive(child *service.S, lookup map[string]*service.S, depth int) {
+	if depth > RecursionLimit {
+		colorterm.Warningf("recursion limit (%v) reached at '%s'", RecursionLimit, child.Name)
+		return
+	}
+	if child.From != "" {
+		if parent, ok := lookup[child.From]; ok {
+			if parent != child {
+				InheritRecursive(parent, lookup, depth+1)
+			}
+			child.InheritFrom(parent)
+		}
+	}
+}
+
+func ResolveValueRecursive(value string, lookup map[string]string, depth int) string {
+	if depth > RecursionLimit {
+		colorterm.Warningf("recursion limit (%v) reached at '%s'", RecursionLimit, value)
+		return value
+	}
+	matches := envVarValuePlaceholder.FindAllStringSubmatch(value, -1)
+	if matches != nil {
+		for _, m := range matches {
+			v, ok := lookup[m[1]]
+			if !ok {
+				v = os.Getenv(m[1])
+			}
+			value = strings.ReplaceAll(value, m[0], ResolveValueRecursive(v, lookup, depth+1))
+		}
+	}
+	return value
+}
+
+func main() {
+	data := LoadConfig()
+	if len(data) == 0 {
+		colorterm.Error("Couldn't find config: expected ./blade.yaml or ./blade directory with YAML files")
 		os.Exit(1)
 	}
 
 	var conf []*service.S
 
-	err = yaml.Unmarshal(b, &conf)
-	if err != nil {
-		colorterm.Error("Couldn't parse yaml from blade.yaml", err)
+	if err := yaml.Unmarshal(data, &conf); err != nil {
+		colorterm.Error("Couldn't parse configuration:", err)
 		os.Exit(1)
 	}
 
@@ -39,6 +134,30 @@ func main() {
 			for _, t := range s.Tags {
 				groups[t] = append(groups[t], s)
 			}
+		}
+	}
+
+	for _, s := range conf {
+		// resolve inheritance
+		InheritRecursive(s, services, 0)
+
+		// resolve env values
+		env := make(map[string]string)
+		for _, e := range s.Env {
+			var v string
+			if e.Value == nil {
+				v = os.Getenv(e.Name)
+			} else {
+				v = *e.Value
+			}
+			env[e.Name] = v
+		}
+		for n, e := range env {
+			env[n] = ResolveValueRecursive(e, env, 0)
+		}
+		for i, e := range s.Env {
+			v := env[e.Name]
+			s.Env[i].Value = &v
 		}
 	}
 
@@ -96,6 +215,7 @@ func main() {
 
 			for _, s := range run {
 				wg.Add(1)
+				grok.V(s)
 				s.Start()
 				go func(s *service.S) {
 					s.Wait()

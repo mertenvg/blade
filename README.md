@@ -171,6 +171,6 @@ This project is licensed under the terms of the license in `LICENSE`.
 - [x] Allow tags per service in `blade.yaml` to filter by tag when running
 - [ ] Document Windows support and SIGINFO behavior across platforms
 - [x] Add unit and integration tests
-- [ ] Add support for multiple yaml files in a single directory for larger configurations
-- [ ] Allow services to inherit from a parent configuration
-- [ ] Make values dynamic so environment variables can be used values using `{$VARIABLE_NAME}`
+- [x] Add support for multiple yaml files in a single directory for larger configurations
+- [x] Allow services to inherit from a parent configuration
+- [x] Make values dynamic so environment variables can be used values using `{$VARIABLE_NAME}`

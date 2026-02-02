@@ -3,6 +3,8 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"github.com/mertenvg/blade/pkg/coalesce"
+	"github.com/mertenvg/blade/pkg/dedupe"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,6 +79,19 @@ type W struct {
 	FS *FSWatcherConfig `yaml:"fs"`
 
 	stop context.CancelFunc
+}
+
+func (w *W) InheritFrom(parent *W) *W {
+	if w == nil || w.FS == nil || parent == nil || parent.FS == nil {
+		return w
+	}
+	return &W{
+		FS: &FSWatcherConfig{
+			Path:   coalesce.StringPointer(parent.FS.Path, w.FS.Path),
+			Paths:  dedupe.StringSlice(append(parent.FS.Paths, w.FS.Paths...)),
+			Ignore: append(parent.FS.Ignore, w.FS.Ignore...),
+		},
+	}
 }
 
 func (w *W) Start(action func()) {

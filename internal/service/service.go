@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mertenvg/blade/pkg/coalesce"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,14 @@ type Output struct {
 	Stdin  string `yaml:"stdin"`
 }
 
+func (o Output) InheritFrom(parent Output) Output {
+	return Output{
+		Stdout: coalesce.String(parent.Stdout, o.Stdout),
+		Stderr: coalesce.String(parent.Stderr, o.Stderr),
+		Stdin:  coalesce.String(parent.Stdin, o.Stdin),
+	}
+}
+
 type S struct {
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
@@ -37,6 +46,7 @@ type S struct {
 	pid       int
 
 	Name       string     `yaml:"name"`
+	From       string     `yaml:"from"`
 	Tags       []string   `yaml:"tags"`
 	Watch      *watcher.W `yaml:"watch"`
 	InheritEnv bool       `yaml:"inheritEnv"`
@@ -108,6 +118,23 @@ func (s *S) Status() (bool, string, string) {
 		}
 	}
 	return active, state, pid
+}
+
+func (s *S) InheritFrom(parent *S) {
+	s.Tags = append(parent.Tags, s.Tags...) // []string   `yaml:"tags"`
+	s.Env = append(parent.Env, s.Env...)    // []EnvValue `yaml:"env"`
+
+	s.Before = coalesce.String(parent.Before, s.Before) // string     `yaml:"before"`
+	s.Run = coalesce.String(parent.Run, s.Run)          // string     `yaml:"run"`
+	s.Dir = coalesce.String(parent.Dir, s.Dir)          // string     `yaml:"dir"`
+	s.Sleep = coalesce.Int(parent.Sleep, s.Sleep)       // int        `yaml:"sleep"`
+
+	s.InheritEnv = parent.InheritEnv || s.InheritEnv // bool       `yaml:"inheritEnv"`
+	s.DNR = parent.DNR || s.DNR                      // bool       `yaml:"dnr"`
+	s.Skip = parent.Skip || s.Skip                   // bool       `yaml:"skip"`
+
+	s.Output = s.Output.InheritFrom(parent.Output)
+	s.Watch = s.Watch.InheritFrom(parent.Watch)
 }
 
 func (s *S) start(cmd string) error {
@@ -210,7 +237,7 @@ func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := exec.CommandContext(ctx, name, args...)
-	c.Dir = coalesce(s.Dir, ".")
+	c.Dir = coalesce.String(s.Dir, ".")
 
 	if s.Output.Stdout == "os" {
 		c.Stdout = os.Stdout
@@ -279,13 +306,4 @@ func (s *S) getpid(assume int) int {
 		return assume
 	}
 	return pid
-}
-
-func coalesce(args ...string) string {
-	for _, str := range args {
-		if str != "" {
-			return str
-		}
-	}
-	return ""
 }

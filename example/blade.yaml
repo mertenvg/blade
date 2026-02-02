@@ -1,8 +1,8 @@
 #
-# Global configuration for all services
+# Default configuration for all services
 #
 
-- name: *
+- name: _default
   watch:
     fs:
       ignore:
@@ -22,6 +22,7 @@
 #
 
 - name: service-one
+  from: _default
   tags:
     - service
   watch:
@@ -32,6 +33,8 @@
       value: VAL_1
     - name: VAR_2
       value: VAL_2
+    - name: RESOLVE_VALUE
+      value: "GV1:{$GLOBAL_VAR_1}"
     - name: VAR_NO_VALUE
     - name: VAR_EMPTY
     - name: PATH

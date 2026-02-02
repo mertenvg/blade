@@ -2,7 +2,7 @@
 # Global configuration for all services
 #
 
-- name: *
+- name: _default
   watch:
     fs:
       ignore:
