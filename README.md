@@ -59,6 +59,7 @@ Blade uses YAML to define services. Minimum per-service fields are: `name` and `
 Example (see full examples in `example/blade.yaml` and `example2/.blade/*`):
 ```yaml
 - name: service-two
+  from: parent-configuration-name
   inheritEnv: true
   env:
     - name: YOUR_VAR
@@ -109,6 +110,7 @@ Behavioral notes:
 - From config (`env`):
   - If `value` is provided, that value is used.
   - If `value` is omitted, the current environment value is captured and forwarded (may be empty).
+  - If `value` contains `{$VAR_NAME}` it will be replaced with the value of the `VAR_NAME` environment variable.
 - `inheritEnv: true` starts the child with the full current environment; otherwise, the child starts with an empty environment and only variables defined in `env` are present.
 
 
