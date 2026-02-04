@@ -48,7 +48,7 @@ func ReadDirRecursive(dir string, depth int) []byte {
 		}
 		buf.Write(TryFile(filepath.Join(dir, e.Name())))
 	}
-	return nil
+	return buf.Bytes()
 }
 
 func TryFile(path string) []byte {
