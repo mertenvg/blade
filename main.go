@@ -73,7 +73,7 @@ func LoadConfig() []byte {
 	if data := TryFile("./blade.yml"); data != nil {
 		return data
 	}
-	if data := ReadDirRecursive("./blade", 0); data != nil {
+	if data := ReadDirRecursive("./.blade", 0); data != nil {
 		return data
 	}
 	return nil
