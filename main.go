@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"github.com/mertenvg/grok"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -215,7 +214,6 @@ func main() {
 
 			for _, s := range run {
 				wg.Add(1)
-				grok.V(s)
 				s.Start()
 				go func(s *service.S) {
 					s.Wait()
