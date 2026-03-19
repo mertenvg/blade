@@ -1,3 +1,14 @@
+# Example: redirect output to files instead of the terminal.
+# {service-name} is replaced with the service's name at runtime.
+# Directories are created automatically.
+#
+# - name: file-output-example
+#   from: _default
+#   run: go run cmd/service-one/main.go
+#   output:
+#     stdout: "file:./logs/{service-name}.out"
+#     stderr: "file:./logs/{service-name}.err"
+
 - name: service-one
   tags:
     - service

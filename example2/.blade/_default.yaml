@@ -14,5 +14,5 @@
     - name: GLOBAL_VAR_1
       value: GLOBAL_VAL_1
   output:
-    stdout: os
-    stderr: os
+    stdout: os   # use "file:./logs/{service-name}.out" to write to a file instead
+    stderr: os   # use "file:./logs/{service-name}.err" to write to a file instead

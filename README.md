@@ -74,6 +74,9 @@ Example (see full examples in `example/blade.yaml` and `example2/.blade/*`):
   output:
     stdout: os
     stderr: os
+    # or write to a file (directories are created automatically):
+    # stdout: "file:./logs/{service-name}.out"
+    # stderr: "file:./logs/{service-name}.err"
 ```
 
 Schema (inferred from code):
@@ -91,9 +94,10 @@ Schema (inferred from code):
     - `value` (string, optional) — explicit value; if omitted, the current environment value is used (may be empty)
   - `dir` (string) — working directory for the command (defaults to `.`)
   - `output` (object) — where to pipe stdio:
-    - `stdout` (string) — when set to `os`, stdout is passed through to the terminal
-    - `stderr` (string) — when set to `os`, stderr is passed through to the terminal
+    - `stdout` (string) — `os` passes stdout to the terminal; `file:<path>` writes to a file (created/appended); omit to discard
+    - `stderr` (string) — `os` passes stderr to the terminal; `file:<path>` writes to a file (created/appended); omit to discard
     - `stdin`  (string) — when NOT set to `os`, stdin is passed through to the terminal (current behavior in code)
+    - The `{service-name}` placeholder in `file:` paths is replaced with the service's `name` value at runtime
   - `sleep` (int, milliseconds) — delay before restarting after a service exits
   - `skip` (bool) — do not start this service when no explicit list is provided
   - `dnr` (bool) — do-not-restart flag used on exit/shutdown
