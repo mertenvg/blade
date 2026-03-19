@@ -6,13 +6,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/mertenvg/blade/pkg/coalesce"
 )
 
 func TestCoalesce(t *testing.T) {
-	if got := coalesce("", "", "a", "b"); got != "a" {
+	if got := coalesce.String("", "", "a", "b"); got != "a" {
 		t.Fatalf("coalesce returned %q, want %q", got, "a")
 	}
-	if got := coalesce(""); got != "" {
+	if got := coalesce.String(""); got != "" {
 		t.Fatalf("coalesce returned %q, want empty", got)
 	}
 }

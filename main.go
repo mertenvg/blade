@@ -30,7 +30,7 @@ func ReadDirRecursive(dir string, depth int) []byte {
 	var buf bytes.Buffer
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		colorterm.Warningf("couldn't read from '%s': %w", dir, err)
+		colorterm.Warningf("couldn't read from '%s': %s", dir, err)
 		return nil
 	}
 	for _, e := range entries {

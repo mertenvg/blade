@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/mertenvg/blade/pkg/coalesce"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/mertenvg/blade/pkg/coalesce"
 
 	"github.com/mertenvg/blade/internal/service/watcher"
 	"github.com/mertenvg/blade/pkg/colorterm"
@@ -194,6 +196,9 @@ func (s *S) start(cmd string) error {
 			// this may be the same process we've waited for above, or a parent process.
 			_ = c.Wait()
 
+			// release any file descriptors opened for output
+			cancel()
+
 			state := ps.String()
 			if ps == nil {
 				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
@@ -229,6 +234,25 @@ func (s *S) run(cmd string) error {
 	return c.Run()
 }
 
+func (s *S) resolveWriter(output string, fallback *os.File) (io.Writer, func(), error) {
+	if output == "os" {
+		return fallback, nil, nil
+	}
+	if strings.HasPrefix(output, "file:") {
+		path := strings.TrimPrefix(output, "file:")
+		path = strings.ReplaceAll(path, "{service-name}", s.Name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, nil, fmt.Errorf("create output dir: %w", err)
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open output file: %w", err)
+		}
+		return f, func() { f.Close() }, nil
+	}
+	return nil, nil, nil
+}
+
 func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 	parts := strings.Split(cmd, " ")
 	name := parts[0]
@@ -239,12 +263,24 @@ func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir = coalesce.String(s.Dir, ".")
 
-	if s.Output.Stdout == "os" {
-		c.Stdout = os.Stdout
+	var closers []func()
+
+	if w, closer, err := s.resolveWriter(s.Output.Stdout, os.Stdout); err != nil {
+		colorterm.Error(s.Name, "stdout:", err)
+	} else {
+		c.Stdout = w
+		if closer != nil {
+			closers = append(closers, closer)
+		}
 	}
 
-	if s.Output.Stderr == "os" {
-		c.Stderr = os.Stderr
+	if w, closer, err := s.resolveWriter(s.Output.Stderr, os.Stderr); err != nil {
+		colorterm.Error(s.Name, "stderr:", err)
+	} else {
+		c.Stderr = w
+		if closer != nil {
+			closers = append(closers, closer)
+		}
 	}
 
 	if s.Output.Stdin != "os" {
@@ -265,7 +301,17 @@ func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 
 	c.Env = append(c.Environ(), fmt.Sprintf("BLADE_SERVICE_NAME=%s", s.Name))
 
-	return c, cancel
+	var once sync.Once
+	wrappedCancel := func() {
+		once.Do(func() {
+			cancel()
+			for _, close := range closers {
+				close()
+			}
+		})
+	}
+
+	return c, wrappedCancel
 }
 
 func (s *S) stop() {
