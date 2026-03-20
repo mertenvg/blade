@@ -176,7 +176,6 @@ func (s *S) start(cmd string) error {
 				continue
 			}
 
-			s.backoff = 0
 			s.pid = s.getpid(c.Process.Pid)
 
 			colorterm.Success(s.Name, "running", fmt.Sprintf("(pid:%d)", s.pid))
@@ -206,6 +205,11 @@ func (s *S) start(cmd string) error {
 				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
 			}
 			s.state = state
+
+			// Reset backoff if the process ran long enough (not a crash loop)
+			if time.Since(s.startedAt) > s.backoff {
+				s.backoff = 0
+			}
 
 			if s.DNR {
 				return
