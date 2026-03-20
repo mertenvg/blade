@@ -26,11 +26,9 @@ func setupTempModuleOrSkip(t *testing.T, dir string) {
 
 const helperProg = `package main
 import (
-    "time"
     blade "github.com/mertenvg/blade/pkg/blade"
 )
 func main(){
-    time.Sleep(500*time.Millisecond)
     blade.Done()
 }
 `
@@ -130,4 +128,85 @@ func TestPIDFile_SymlinkOverwriteRisk(t *testing.T) {
 	// cleanup
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
+}
+
+// helperDoneOnly calls blade.Done() immediately. The init() will also run,
+// writing the process's own PID. We pre-seed the file with a foreign PID
+// before launching this helper to verify Done() leaves the file intact.
+const helperDoneOnly = `package main
+import blade "github.com/mertenvg/blade/pkg/blade"
+func main(){ blade.Done() }
+`
+
+func TestDone_DoesNotRemoveOtherPID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	tmp := t.TempDir()
+	prog := filepath.Join(tmp, "main.go")
+	if err := os.WriteFile(prog, []byte(helperDoneOnly), 0o644); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	setupTempModuleOrSkip(t, tmp)
+
+	service := "svc_other"
+	pidFile := filepath.Join(tmp, "."+service+".pid")
+	foreignPID := "999999"
+
+	// Strategy: launch a helper that sleeps between init() and Done().
+	// During the sleep, overwrite the PID file with a foreign PID.
+	// When Done() runs, it should see the foreign PID and leave the file.
+	helperWithSleep := `package main
+import (
+    "time"
+    blade "github.com/mertenvg/blade/pkg/blade"
+)
+func main(){
+    time.Sleep(2*time.Second)
+    blade.Done()
+}
+`
+	if err := os.WriteFile(prog, []byte(helperWithSleep), 0o644); err != nil {
+		t.Fatalf("rewrite helper: %v", err)
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+
+	cmd := exec.CommandContext(ctx2, "go", "run", ".")
+	cmd.Dir = tmp
+	cmd.Env = append(os.Environ(), "BLADE_SERVICE_NAME="+service)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+
+	// Wait for init() to write the PID file with the process's own PID
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(pidFile); err == nil && string(b) != foreignPID {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Now overwrite the PID file with a foreign PID (simulating a newer process taking over)
+	if err := os.WriteFile(pidFile, []byte(foreignPID), 0o644); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("overwrite pid file: %v", err)
+	}
+
+	// Wait for the helper to finish (Done() will run)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("helper failed: %v", err)
+	}
+
+	// The PID file should still exist with the foreign PID
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("pid file was removed by Done() but should have been preserved (foreign PID): %v", err)
+	}
+	if string(b) != foreignPID {
+		t.Fatalf("pid file content changed: got %q, want %q", string(b), foreignPID)
+	}
 }

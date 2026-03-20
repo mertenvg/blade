@@ -21,8 +21,20 @@ func Done() {
 	if serviceName == "" {
 		return
 	}
-	err := os.Remove(fmt.Sprintf("./.%s.pid", serviceName))
+
+	pidFile := fmt.Sprintf("./.%s.pid", serviceName)
+	myPid := fmt.Sprintf("%d", os.Getpid())
+
+	contents, err := os.ReadFile(pidFile)
 	if err != nil {
-		panic(fmt.Sprintf("failed to remove pid file: %s", err))
+		// File already gone or unreadable — nothing to clean up
+		return
 	}
+
+	if string(contents) != myPid {
+		// File contains a different PID (newer process already took over) — leave it alone
+		return
+	}
+
+	_ = os.Remove(pidFile)
 }

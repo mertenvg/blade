@@ -105,9 +105,10 @@ func (s *S) Status() (bool, string, string) {
 	if s.state != "" {
 		state = s.state
 	}
-	if s.pid != 0 {
-		pid = fmt.Sprintf("(%d)", s.pid)
-		p := s.process()
+	currentPid := s.getpid(s.pid)
+	if currentPid != 0 {
+		pid = fmt.Sprintf("(%d)", currentPid)
+		p, _ := os.FindProcess(currentPid)
 		if p != nil {
 			err := p.Signal(syscall.Signal(0))
 			if err == nil {
