@@ -43,7 +43,7 @@ type S struct {
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
 	startedAt time.Time
-	backoff   int
+	backoff   time.Duration
 	state     string
 	pid       int
 
@@ -88,6 +88,7 @@ func (s *S) Restart() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	s.backoff = 0
 	s.stop()
 }
 
@@ -166,10 +167,10 @@ func (s *S) start(cmd string) error {
 				}
 
 				if s.backoff == 0 {
-					s.backoff = 1
+					s.backoff = time.Second
 				}
 
-				time.Sleep(time.Second * time.Duration(s.backoff))
+				time.Sleep(s.backoff)
 				s.backoff *= 2
 
 				continue
@@ -212,6 +213,15 @@ func (s *S) start(cmd string) error {
 
 			if s.Sleep > 0 {
 				time.Sleep(time.Duration(s.Sleep) * time.Millisecond)
+			}
+
+			// Exponential backoff for repeated crashes
+			if s.backoff > 0 {
+				colorterm.Info(s.Name, fmt.Sprintf("restart delayed %s", s.backoff))
+				time.Sleep(s.backoff)
+				s.backoff *= 2
+			} else {
+				s.backoff = time.Second
 			}
 		}
 	}(s, cmd)
