@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/mertenvg/blade/pkg/coalesce"
 	"github.com/mertenvg/blade/pkg/dedupe"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -177,7 +178,9 @@ func (fs *FSWatcher) Scan() {
 
 	stat, err := os.Stat(fs.path)
 	if err != nil {
-		colorterm.Error(fs.path, err)
+		if !errors.Is(err, os.ErrNotExist) {
+			colorterm.Error(fs.path, err)
+		}
 		return
 	}
 
@@ -193,7 +196,9 @@ func (fs *FSWatcher) Scan() {
 		}
 		files, err := os.ReadDir(fs.path)
 		if err != nil {
-			colorterm.Error(fs.path, err)
+			if !errors.Is(err, os.ErrNotExist) {
+				colorterm.Error(fs.path, err)
+			}
 			return
 		}
 		var children []*FSWatcher
