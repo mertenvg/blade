@@ -200,6 +200,9 @@ func (s *S) start(cmd string) error {
 			// release any file descriptors opened for output
 			cancel()
 
+			// wait for the process to fully exit and pid file to be removed
+			s.waitForExit()
+
 			state := ps.String()
 			if ps == nil {
 				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
@@ -352,8 +355,53 @@ func (s *S) process() *os.Process {
 	return nil
 }
 
+func (s *S) pidFilePath() string {
+	return filepath.Join(s.Dir, fmt.Sprintf(".%s.pid", s.Name))
+}
+
+func (s *S) waitForExit() {
+	deadline := time.After(30 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		processRunning := false
+		if s.pid > 0 {
+			proc, err := os.FindProcess(s.pid)
+			if err == nil && proc != nil {
+				if err := proc.Signal(syscall.Signal(0)); err == nil {
+					processRunning = true
+				}
+			}
+		}
+
+		_, pidFileErr := os.Stat(s.pidFilePath())
+		pidFileExists := pidFileErr == nil
+
+		if !processRunning && !pidFileExists {
+			return
+		}
+
+		select {
+		case <-deadline:
+			if processRunning {
+				colorterm.Warning(s.Name, "timed out waiting for process to exit, sending SIGKILL")
+				if proc, err := os.FindProcess(s.pid); err == nil && proc != nil {
+					_ = proc.Signal(syscall.SIGKILL)
+				}
+			}
+			if pidFileExists {
+				colorterm.Warning(s.Name, "timed out waiting for pid file removal, cleaning up")
+				_ = os.Remove(s.pidFilePath())
+			}
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *S) getpid(assume int) int {
-	pidFilePath := filepath.Join(s.Dir, fmt.Sprintf(".%s.pid", s.Name))
+	pidFilePath := s.pidFilePath()
 	_, err := os.Stat(pidFilePath)
 	if err != nil {
 		return assume
