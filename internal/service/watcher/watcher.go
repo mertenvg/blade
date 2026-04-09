@@ -95,8 +95,8 @@ func (w *W) InheritFrom(parent *W) *W {
 	}
 }
 
-func (w *W) Start(action func()) {
-	ctx, cancel := context.WithCancel(context.Background())
+func (w *W) Start(parent context.Context, action func()) {
+	ctx, cancel := context.WithCancel(parent)
 	w.stop = cancel
 
 	var watchers Watchers
