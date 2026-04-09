@@ -29,7 +29,7 @@ func main() {
 	defer cancel()
 
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINFO)
+	notifyInfoSignal(sig)
 
 	done := make(chan struct{}, 1)
 

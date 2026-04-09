@@ -20,6 +20,13 @@ import (
 	"github.com/mertenvg/blade/pkg/colorterm"
 )
 
+// empty is used for signal-only channels in place of struct{}{}.
+type empty struct{}
+
+// gracePeriod is how long we wait between SIGTERM and SIGKILL when
+// cancelling or restarting a running child process.
+const gracePeriod = 5 * time.Second
+
 type EnvValue struct {
 	Name  string  `yaml:"name"`
 	Value *string `yaml:"value,omitempty"`
@@ -41,7 +48,7 @@ func (o Output) InheritFrom(parent Output) Output {
 
 type S struct {
 	wg        sync.WaitGroup
-	cancel    context.CancelFunc
+	restartCh chan empty
 	startedAt time.Time
 	backoff   time.Duration
 	state     string
@@ -62,18 +69,19 @@ type S struct {
 	Sleep      int        `yaml:"sleep"`
 }
 
-func (s *S) Start() {
+func (s *S) Start(ctx context.Context) {
 	colorterm.Info(s.Name, "starting")
-	if err := s.run(s.Before); err != nil {
+	if err := s.run(ctx, s.Before); err != nil {
 		fmt.Println(s.Name, "'before' cmd failed with error:", err)
 		return
 	}
-	if err := s.start(s.Run); err != nil {
+	s.restartCh = make(chan empty, 1)
+	if err := s.start(ctx, s.Run); err != nil {
 		colorterm.Error(s.Name, "failed to start with error:", err)
 		return
 	}
 	if s.Watch != nil {
-		s.Watch.Start(s.Restart)
+		s.Watch.Start(ctx, s.Restart)
 	}
 }
 
@@ -82,21 +90,29 @@ func (s *S) Wait() {
 	colorterm.Success(s.Name, "finished")
 }
 
+// Restart asks the running loop to terminate the current child process and
+// start a new one. It is a non-blocking signal; coalesces if already pending.
 func (s *S) Restart() {
 	colorterm.Info(s.Name, "restarting")
-
-	s.wg.Add(1)
-	defer s.wg.Done()
-
-	s.backoff = 0
-	s.stop()
+	if s.restartCh == nil {
+		return
+	}
+	select {
+	case s.restartCh <- empty{}:
+	default:
+	}
 }
 
+// Exit marks the service as do-not-restart and wakes the run loop so it can
+// observe the flag and return. Safe to call even if the service was never
+// started or has no watcher.
 func (s *S) Exit() {
-	s.Watch.Stop()
+	if s.Watch != nil {
+		s.Watch.Stop()
+	}
 	s.DNR = true
 	colorterm.Info(s.Name, "exiting")
-	s.stop()
+	s.Restart()
 }
 
 func (s *S) Status() (bool, string, string) {
@@ -141,115 +157,178 @@ func (s *S) InheritFrom(parent *S) {
 	s.Watch = s.Watch.InheritFrom(parent.Watch)
 }
 
-func (s *S) start(cmd string) error {
+func (s *S) start(ctx context.Context, cmd string) error {
 	if cmd == "" {
 		return fmt.Errorf("cmd is empty")
 	}
 
 	s.wg.Add(1)
 
-	go func(s *S, cmd string) {
+	go func() {
 		defer s.wg.Done()
 
 		for {
-			c, cancel := s.parse(cmd)
+			if ctx.Err() != nil || s.DNR {
+				return
+			}
 
-			s.cancel = cancel
+			cmdCtx, cmdCancel := context.WithCancel(ctx)
+			c, closeOutputs := s.parse(cmdCtx, cmd)
+
 			s.startedAt = time.Now()
 
 			if err := c.Start(); err != nil {
-				cancel()
+				closeOutputs()
+				cmdCancel()
 
 				colorterm.Error(s.Name, "command failed with error:", err)
 
-				if s.DNR {
+				if s.DNR || ctx.Err() != nil {
 					return
 				}
 
 				if s.backoff == 0 {
 					s.backoff = time.Second
 				}
-
-				time.Sleep(s.backoff)
+				if !sleepCtx(ctx, s.backoff) {
+					return
+				}
 				s.backoff *= 2
 
 				continue
 			}
 
 			s.pid = s.getpid(c.Process.Pid)
-
 			colorterm.Success(s.Name, "running", fmt.Sprintf("(pid:%d)", s.pid))
 
-			p := s.process()
+			restartRequested := s.waitCmd(ctx, c)
 
-			ps, err := p.Wait()
-			if err != nil && err.Error() != "signal: killed" && err.Error() != "wait: no child processes" {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
-					colorterm.Error(s.Name, "ended with error:", err)
-				} else {
-					colorterm.Error(s.Name, "error waiting for process:", err)
-				}
-			} else {
-				colorterm.Info(s.Name, "ended")
-			}
+			closeOutputs()
+			cmdCancel()
 
-			// this may be the same process we've waited for above, or a parent process.
-			_ = c.Wait()
-
-			// release any file descriptors opened for output
-			cancel()
-
-			// wait for the process to fully exit and pid file to be removed
-			s.waitForExit()
-
-			state := ps.String()
-			if ps == nil {
-				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second))
-			}
-			s.state = state
+			s.waitForExit(ctx)
 
 			// Reset backoff if the process ran long enough (not a crash loop)
 			if time.Since(s.startedAt) > s.backoff {
 				s.backoff = 0
 			}
 
-			if s.DNR {
+			if ctx.Err() != nil || s.DNR {
 				return
 			}
 
+			// An explicit restart means "start again now" — skip the backoff.
+			if restartRequested {
+				s.backoff = 0
+			}
+
 			if s.Sleep > 0 {
-				time.Sleep(time.Duration(s.Sleep) * time.Millisecond)
+				if !sleepCtx(ctx, time.Duration(s.Sleep)*time.Millisecond) {
+					return
+				}
 			}
 
 			// Exponential backoff for repeated crashes
 			if s.backoff > 0 {
 				colorterm.Info(s.Name, fmt.Sprintf("restart delayed %s", s.backoff))
-				time.Sleep(s.backoff)
+				if !sleepCtx(ctx, s.backoff) {
+					return
+				}
 				s.backoff *= 2
 			} else {
 				s.backoff = time.Second
 			}
 		}
-	}(s, cmd)
+	}()
 
 	return nil
 }
 
-func (s *S) run(cmd string) error {
+// waitCmd waits for c to exit, ctx to be cancelled, or a restart to be
+// requested. On cancel/restart it escalates SIGTERM -> SIGKILL with a grace
+// period and always reaps the child before returning. Returns true if a
+// restart was explicitly requested.
+func (s *S) waitCmd(ctx context.Context, c *exec.Cmd) bool {
+	done := make(chan error, 1)
+	go func() { done <- c.Wait() }()
+
+	var restart bool
+	select {
+	case err := <-done:
+		s.logWaitError(err)
+		return false
+	case <-ctx.Done():
+	case <-s.restartCh:
+		restart = true
+	}
+
+	// Graceful termination first.
+	if proc := s.process(); proc != nil {
+		_ = proc.Signal(syscall.SIGTERM)
+	}
+	select {
+	case err := <-done:
+		s.logWaitError(err)
+		return restart
+	case <-time.After(gracePeriod):
+	}
+
+	// Force kill.
+	if proc := s.process(); proc != nil {
+		colorterm.Warning(s.Name, "process did not exit after SIGTERM, sending SIGKILL")
+		_ = proc.Kill()
+	}
+	select {
+	case err := <-done:
+		s.logWaitError(err)
+	case <-time.After(gracePeriod):
+		colorterm.Error(s.Name, "process did not exit after SIGKILL; abandoning")
+	}
+	return restart
+}
+
+func (s *S) logWaitError(err error) {
+	if err == nil {
+		colorterm.Info(s.Name, "ended")
+		return
+	}
+	if err.Error() == "signal: killed" || err.Error() == "signal: terminated" || err.Error() == "wait: no child processes" {
+		colorterm.Info(s.Name, "ended")
+		return
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		colorterm.Error(s.Name, "ended with error:", err)
+		return
+	}
+	colorterm.Error(s.Name, "error waiting for process:", err)
+}
+
+func (s *S) run(ctx context.Context, cmd string) error {
 	if cmd == "" {
 		return nil
 	}
 
-	s.wg.Add(1)
-	defer s.wg.Done()
-
-	c, cancel := s.parse(cmd)
-	defer cancel()
-
-	s.cancel = cancel
+	c, closeOutputs := s.parse(ctx, cmd)
+	defer closeOutputs()
 
 	return c.Run()
+}
+
+// sleepCtx sleeps for d or until ctx is cancelled. Returns false if ctx was
+// cancelled (caller should stop), true otherwise.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (s *S) resolveWriter(output string, fallback *os.File) (io.Writer, func(), error) {
@@ -271,12 +350,12 @@ func (s *S) resolveWriter(output string, fallback *os.File) (io.Writer, func(), 
 	return nil, nil, nil
 }
 
-func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
+// parse builds an exec.Cmd bound to ctx. The returned function closes any
+// output files opened for redirection and is idempotent.
+func (s *S) parse(ctx context.Context, cmd string) (*exec.Cmd, func()) {
 	parts := strings.Split(cmd, " ")
 	name := parts[0]
 	args := parts[1:]
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir = coalesce.String(s.Dir, ".")
@@ -320,28 +399,15 @@ func (s *S) parse(cmd string) (*exec.Cmd, context.CancelFunc) {
 	c.Env = append(c.Environ(), fmt.Sprintf("BLADE_SERVICE_NAME=%s", s.Name))
 
 	var once sync.Once
-	wrappedCancel := func() {
+	closeOutputs := func() {
 		once.Do(func() {
-			cancel()
 			for _, close := range closers {
 				close()
 			}
 		})
 	}
 
-	return c, wrappedCancel
-}
-
-func (s *S) stop() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	proc := s.process()
-	if proc != nil {
-		if err := proc.Kill(); err != nil {
-			colorterm.Error(s.Name, "failed to kill process:", err)
-		}
-	}
+	return c, closeOutputs
 }
 
 func (s *S) process() *os.Process {
@@ -359,7 +425,10 @@ func (s *S) pidFilePath() string {
 	return filepath.Join(s.Dir, fmt.Sprintf(".%s.pid", s.Name))
 }
 
-func (s *S) waitForExit() {
+// waitForExit polls until both the tracked process and its PID file are gone,
+// or ctx is cancelled, or a 30s hard deadline is hit. On cancel/deadline it
+// force-kills any remaining process and removes a stale PID file.
+func (s *S) waitForExit(ctx context.Context) {
 	deadline := time.After(30 * time.Second)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -383,6 +452,16 @@ func (s *S) waitForExit() {
 		}
 
 		select {
+		case <-ctx.Done():
+			if processRunning {
+				if proc, err := os.FindProcess(s.pid); err == nil && proc != nil {
+					_ = proc.Signal(syscall.SIGKILL)
+				}
+			}
+			if pidFileExists {
+				_ = os.Remove(s.pidFilePath())
+			}
+			return
 		case <-deadline:
 			if processRunning {
 				colorterm.Warning(s.Name, "timed out waiting for process to exit, sending SIGKILL")

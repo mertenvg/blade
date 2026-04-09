@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -212,14 +213,60 @@ func main() {
 				}
 			}
 
+			// Single root context governs every service and watcher.
+			rootCtx, rootCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer rootCancel()
+
 			for _, s := range run {
 				wg.Add(1)
-				s.Start()
+				s.Start(rootCtx)
 				go func(s *service.S) {
 					s.Wait()
 					wg.Done()
 				}(s)
 			}
+
+			info := make(chan os.Signal, 1)
+			if len(infoSignals) > 0 {
+				signal.Notify(info, infoSignals...)
+			}
+
+			go func() {
+				for {
+					select {
+					case <-rootCtx.Done():
+						return
+					case <-info:
+						for _, s := range conf {
+							active, state, pid := s.Status()
+							if active {
+								colorterm.Success(s.Name, pid, state)
+							} else {
+								colorterm.Error(s.Name, pid, state)
+							}
+						}
+					}
+				}
+			}()
+
+			<-rootCtx.Done()
+			signal.Stop(info)
+			close(info)
+
+			colorterm.Warning("shutting down...")
+
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(15 * time.Second):
+				colorterm.Error("services did not exit in time, forcing")
+				os.Exit(1)
+			}
+			return
 		}
 	} else {
 		colorterm.Info("Services available:")
@@ -237,43 +284,4 @@ func main() {
 		return
 	}
 
-	info := make(chan os.Signal, 1)
-	signal.Notify(info, syscall.SIGINFO)
-
-	// Wait for interrupt or term signal from OS
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	done := make(chan struct{}, 1)
-
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-info:
-				for _, s := range conf {
-					active, state, pid := s.Status()
-					if active {
-						colorterm.Success(s.Name, pid, state)
-					} else {
-						colorterm.Error(s.Name, pid, state)
-					}
-				}
-			}
-		}
-	}()
-
-	<-done
-
-	close(info)
-
-	colorterm.Warning("shutting down...")
-
-	for _, s := range conf {
-		s.Exit()
-	}
-
-	wg.Wait()
 }

@@ -37,7 +37,7 @@ func main() {
 
 		fmt.Println("test-update-loop started update-loop with pid", c.Process.Pid)
 
-		if err := c.Process.Signal(syscall.SIGINFO); err != nil {
+		if err := sendInfoSignal(c.Process); err != nil {
 			fmt.Println("test-update-loop error sending info signal:", err)
 		}
 

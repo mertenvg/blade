@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mertenvg/blade/pkg/coalesce"
 )
@@ -30,8 +32,8 @@ func TestParse_EnvHandling_NoInherit(t *testing.T) {
 			{Name: "PATH"}, // explicit inclusion when Value is nil should pull from parent
 		},
 	}
-	cmd, cancel := s.parse("echo hi")
-	defer cancel()
+	cmd, closeOutputs := s.parse(context.Background(), "echo hi")
+	defer closeOutputs()
 
 	// Env should contain only our specified entries plus BLADE_SERVICE_NAME
 	env := cmd.Env
@@ -58,7 +60,7 @@ func TestParse_EnvHandling_NoInherit(t *testing.T) {
 
 func TestStart_WithEmptyCmdErrors(t *testing.T) {
 	s := &S{Name: "svc"}
-	if err := s.start(""); err == nil {
+	if err := s.start(context.Background(), ""); err == nil {
 		t.Fatalf("expected error when starting with empty command")
 	}
 }
@@ -105,8 +107,8 @@ func TestParse_CommandSplittingIsNaive(t *testing.T) {
 	}
 	s := &S{Name: "svc"}
 	// Argument with space inside quotes will be split incorrectly by strings.Split
-	cmd, cancel := s.parse("/bin/echo 'hello world'")
-	defer cancel()
+	cmd, closeOutputs := s.parse(context.Background(), "/bin/echo 'hello world'")
+	defer closeOutputs()
 	if len(cmd.Args) != 3 { // expect [/bin/echo 'hello world'] but actually becomes 3 elements when quotes present
 		// We do not fail the test; instead, flag as potential issue through error
 		t.Logf("potential issue: naive splitting resulted in %d args: %v", len(cmd.Args), cmd.Args)
@@ -118,6 +120,103 @@ func TestParse_CommandSplittingIsNaive(t *testing.T) {
 		t.Fatalf("failed to start command: %v", err)
 	}
 	_ = cmd.Process.Kill()
+}
+
+func TestSleepCtx_TimerElapses(t *testing.T) {
+	if !sleepCtx(context.Background(), 10*time.Millisecond) {
+		t.Fatalf("expected true when timer elapses")
+	}
+}
+
+func TestSleepCtx_CancelReturnsFalse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sleepCtx(ctx, time.Hour) {
+		t.Fatalf("expected false when ctx cancelled")
+	}
+}
+
+func TestSleepCtx_ZeroDurationRespectsCtx(t *testing.T) {
+	if !sleepCtx(context.Background(), 0) {
+		t.Fatalf("expected true with zero duration and live ctx")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sleepCtx(ctx, 0) {
+		t.Fatalf("expected false with zero duration and dead ctx")
+	}
+}
+
+func TestRestart_NilChannelIsNoOp(t *testing.T) {
+	s := &S{Name: "svc"}
+	// Must not panic when restartCh has not been initialised (Start not called).
+	s.Restart()
+}
+
+func TestRestart_Coalesces(t *testing.T) {
+	s := &S{Name: "svc", restartCh: make(chan empty, 1)}
+	// Two rapid restarts should not block even though the channel buffer is 1.
+	done := make(chan struct{})
+	go func() {
+		s.Restart()
+		s.Restart()
+		s.Restart()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("Restart blocked; should coalesce when channel is full")
+	}
+	// Drain the single buffered slot.
+	select {
+	case <-s.restartCh:
+	default:
+		t.Fatalf("expected one pending restart in the buffered channel")
+	}
+}
+
+func TestStart_ContextCancelStopsService(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses unix sleep")
+	}
+	s := &S{Name: "svc", Run: "sleep 30"}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+
+	// Give the child a moment to actually be running.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	done := make(chan struct{})
+	go func() { s.Wait(); close(done) }()
+
+	// sleep doesn't trap SIGTERM so it should die well before the SIGKILL grace.
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("service did not exit after context cancel")
+	}
+}
+
+func TestExit_StopsServiceWithoutWatcher(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses unix sleep")
+	}
+	s := &S{Name: "svc", Run: "sleep 30"}
+	s.Start(context.Background())
+
+	time.Sleep(200 * time.Millisecond)
+	s.Exit()
+
+	done := make(chan struct{})
+	go func() { s.Wait(); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("service did not exit after Exit() call")
+	}
 }
 
 // helpers
