@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -46,10 +45,9 @@ func TestParse_EnvHandling_NoInherit(t *testing.T) {
 		}
 	}
 
-	// Should contain our explicit FOO and BLADE_SERVICE_NAME
+	// Should contain our explicit FOO
 	assertEnvHas(t, env, "FOO=bar")
 	assertEnvHasPrefix(t, env, "PATH=")
-	assertEnvHas(t, env, "BLADE_SERVICE_NAME=svc")
 
 	// Output.Stdin behavior seems inverted: with default empty Output.Stdin, parse sets c.Stdin to os.Stdin
 	// This may unintentionally allow child processes to read from parent's stdin.
@@ -65,27 +63,6 @@ func TestStart_WithEmptyCmdErrors(t *testing.T) {
 	}
 }
 
-func TestGetPID_TrustsPidFile(t *testing.T) {
-	tmp := t.TempDir()
-	s := &S{Name: "svc", Dir: tmp}
-
-	pidFile := filepath.Join(tmp, ".svc.pid")
-	if err := os.WriteFile(pidFile, []byte("99999"), 0o644); err != nil {
-		t.Fatalf("write pid file: %v", err)
-	}
-
-	pid := s.getpid(12345)
-	if pid != 99999 {
-		t.Fatalf("expected pid from file (99999), got %d", pid)
-	}
-}
-
-func TestProcess_NotFoundDoesNotPanic(t *testing.T) {
-	s := &S{Name: "svc"}
-	s.pid = 999999 // likely nonexistent
-	p := s.process()
-	_ = p // ensure no panic
-}
 
 func TestStatus_Defaults(t *testing.T) {
 	s := &S{Name: "svc"}

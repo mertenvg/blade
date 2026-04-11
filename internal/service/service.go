@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -51,8 +50,8 @@ type S struct {
 	restartCh chan empty
 	startedAt time.Time
 	backoff   time.Duration
-	state     string
-	pid       int
+	state string
+	pid   int
 
 	Name       string     `yaml:"name"`
 	From       string     `yaml:"from"`
@@ -122,14 +121,13 @@ func (s *S) Status() (bool, string, string) {
 	if s.state != "" {
 		state = s.state
 	}
-	currentPid := s.getpid(s.pid)
-	if currentPid != 0 {
-		pid = fmt.Sprintf("(%d)", currentPid)
-		p, _ := os.FindProcess(currentPid)
+	if s.pid != 0 {
+		pid = fmt.Sprintf("(%d)", s.pid)
+		p, _ := os.FindProcess(s.pid)
 		if p != nil {
 			err := p.Signal(syscall.Signal(0))
 			if err == nil {
-				state = fmt.Sprintf("OK %s", time.Now().Sub(s.startedAt).Round(time.Second).String())
+				state = fmt.Sprintf("OK %s", time.Since(s.startedAt).Round(time.Second).String())
 				active = true
 			}
 			if err != nil {
@@ -198,7 +196,7 @@ func (s *S) start(ctx context.Context, cmd string) error {
 				continue
 			}
 
-			s.pid = s.getpid(c.Process.Pid)
+			s.pid = c.Process.Pid
 			colorterm.Success(s.Name, "running", fmt.Sprintf("(pid:%d)", s.pid))
 
 			restartRequested := s.waitCmd(ctx, c)
@@ -207,6 +205,7 @@ func (s *S) start(ctx context.Context, cmd string) error {
 			cmdCancel()
 
 			s.waitForExit(ctx)
+			s.pid = 0
 
 			// Reset backoff if the process ran long enough (not a crash loop)
 			if time.Since(s.startedAt) > s.backoff {
@@ -262,10 +261,10 @@ func (s *S) waitCmd(ctx context.Context, c *exec.Cmd) bool {
 		restart = true
 	}
 
-	// Graceful termination first.
-	if proc := s.process(); proc != nil {
-		_ = proc.Signal(syscall.SIGTERM)
-	}
+	// Graceful termination — signal the entire process group so that
+	// grandchildren (e.g. the actual server spawned by `go run`) also
+	// receive the signal and release their sockets.
+	_ = s.signalGroup(syscall.SIGTERM)
 	select {
 	case err := <-done:
 		s.logWaitError(err)
@@ -273,11 +272,9 @@ func (s *S) waitCmd(ctx context.Context, c *exec.Cmd) bool {
 	case <-time.After(gracePeriod):
 	}
 
-	// Force kill.
-	if proc := s.process(); proc != nil {
-		colorterm.Warning(s.Name, "process did not exit after SIGTERM, sending SIGKILL")
-		_ = proc.Kill()
-	}
+	// Force kill the entire process group.
+	colorterm.Warning(s.Name, "process did not exit after SIGTERM, sending SIGKILL")
+	_ = s.signalGroup(syscall.SIGKILL)
 	select {
 	case err := <-done:
 		s.logWaitError(err)
@@ -359,6 +356,11 @@ func (s *S) parse(ctx context.Context, cmd string) (*exec.Cmd, func()) {
 
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir = coalesce.String(s.Dir, ".")
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	}
+	c.WaitDelay = gracePeriod
 
 	var closers []func()
 
@@ -396,8 +398,6 @@ func (s *S) parse(ctx context.Context, cmd string) (*exec.Cmd, func()) {
 		c.Env = append(c.Environ(), fmt.Sprintf("%s=%s", e.Name, v))
 	}
 
-	c.Env = append(c.Environ(), fmt.Sprintf("BLADE_SERVICE_NAME=%s", s.Name))
-
 	var once sync.Once
 	closeOutputs := func() {
 		once.Do(func() {
@@ -410,88 +410,36 @@ func (s *S) parse(ctx context.Context, cmd string) (*exec.Cmd, func()) {
 	return c, closeOutputs
 }
 
-func (s *S) process() *os.Process {
-	if s.pid > 0 {
-		proc, err := os.FindProcess(s.pid)
-		if err != nil {
-			colorterm.Error(s.Name, "failed to find process:", err)
-		}
-		return proc
+// signalGroup sends a signal to the entire process group of the running child.
+// This ensures grandchildren (e.g. a server spawned by `go run`) also receive
+// the signal and release their resources (sockets, files, etc.).
+func (s *S) signalGroup(sig syscall.Signal) error {
+	if s.pid <= 0 {
+		return nil
 	}
-	return nil
+	return syscall.Kill(-s.pid, sig)
 }
 
-func (s *S) pidFilePath() string {
-	return filepath.Join(s.Dir, fmt.Sprintf(".%s.pid", s.Name))
-}
-
-// waitForExit polls until both the tracked process and its PID file are gone,
-// or ctx is cancelled, or a 30s hard deadline is hit. On cancel/deadline it
-// force-kills any remaining process and removes a stale PID file.
+// waitForExit polls until the process group is gone or a 5s deadline is hit.
+// After waitCmd has sent SIGTERM/SIGKILL to the group and c.Wait() has reaped
+// the direct child, resources (sockets, files) are already released. This poll
+// is a safety net; zombies may linger but don't hold resources.
 func (s *S) waitForExit(ctx context.Context) {
-	deadline := time.After(30 * time.Second)
+	deadline := time.After(5 * time.Second)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
-		processRunning := false
-		if s.pid > 0 {
-			proc, err := os.FindProcess(s.pid)
-			if err == nil && proc != nil {
-				if err := proc.Signal(syscall.Signal(0)); err == nil {
-					processRunning = true
-				}
-			}
-		}
-
-		_, pidFileErr := os.Stat(s.pidFilePath())
-		pidFileExists := pidFileErr == nil
-
-		if !processRunning && !pidFileExists {
+		if s.pid <= 0 || syscall.Kill(-s.pid, 0) != nil {
 			return
 		}
-
 		select {
 		case <-ctx.Done():
-			if processRunning {
-				if proc, err := os.FindProcess(s.pid); err == nil && proc != nil {
-					_ = proc.Signal(syscall.SIGKILL)
-				}
-			}
-			if pidFileExists {
-				_ = os.Remove(s.pidFilePath())
-			}
+			_ = s.signalGroup(syscall.SIGKILL)
 			return
 		case <-deadline:
-			if processRunning {
-				colorterm.Warning(s.Name, "timed out waiting for process to exit, sending SIGKILL")
-				if proc, err := os.FindProcess(s.pid); err == nil && proc != nil {
-					_ = proc.Signal(syscall.SIGKILL)
-				}
-			}
-			if pidFileExists {
-				colorterm.Warning(s.Name, "timed out waiting for pid file removal, cleaning up")
-				_ = os.Remove(s.pidFilePath())
-			}
 			return
 		case <-ticker.C:
 		}
 	}
-}
-
-func (s *S) getpid(assume int) int {
-	pidFilePath := s.pidFilePath()
-	_, err := os.Stat(pidFilePath)
-	if err != nil {
-		return assume
-	}
-	text, err := os.ReadFile(pidFilePath)
-	if err != nil {
-		return assume
-	}
-	pid, err := strconv.Atoi(string(text))
-	if err != nil {
-		return assume
-	}
-	return pid
 }
