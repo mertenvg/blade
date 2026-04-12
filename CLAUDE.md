@@ -16,13 +16,14 @@ Refer to the AI engineering guidelines at https://github.com/mertenvg/my-ai-guid
 - Format / vet: `go fmt ./...` / `go vet ./...`
 
 ## Architecture
-Entry point `main.go` loads YAML config from `./blade.yaml` or `./.blade/`, resolves service inheritance (`from:` field), interpolates env vars (`{$VAR}` syntax), then starts services and installs signal handlers.
+Entry point `main.go` first handles config-independent commands (`version`, `check-for-updates`, `update`), then loads YAML config from `./blade.yaml` or `./.blade/`, resolves service inheritance (`from:` field), interpolates env vars (`{$VAR}` syntax), then starts services and installs signal handlers.
 
 - `internal/service/` — core lifecycle. `service.S` exposes `Start`, `Wait`, `Restart`, `Exit`, `Status`, `InheritFrom`. Restart flow waits for full process exit before respawning and applies a backoff delay.
 - `internal/service/watcher/` — filesystem watcher with glob-style ignore patterns (`*`, `**`); triggers `Restart` on change. Transient errors (e.g. missing paths) are suppressed.
 - `pkg/colorterm/` — ANSI color helpers (`Info`, `Success`, `Error`, ...). Reuse these instead of hand-writing escape codes.
 - `pkg/blade/` — small helper library for child processes; uses `BLADE_SERVICE_NAME` env var and PID files to track lifecycle (`Done()`).
 - `pkg/coalesce/`, `pkg/dedupe/` — small utilities used by config inheritance resolution.
+- `version.go` — version resolution (ldflags or `debug.ReadBuildInfo()`), `check-for-updates` (queries Go module proxy), and `update` (`go install @latest`).
 - `example/` — runnable examples; keep in sync when changing user-facing behavior.
 
 Only third-party dependency is `gopkg.in/yaml.v3`. The project deliberately favors stdlib and minimal abstractions.

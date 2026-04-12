@@ -113,6 +113,22 @@ func ResolveValueRecursive(value string, lookup map[string]string, depth int) st
 }
 
 func main() {
+	args := os.Args
+
+	if len(args) > 1 {
+		switch args[1] {
+		case "version":
+			printVersion()
+			return
+		case "check-for-updates":
+			checkForUpdates()
+			return
+		case "update":
+			update()
+			return
+		}
+	}
+
 	data := LoadConfig()
 	if len(data) == 0 {
 		colorterm.Error("Couldn't find config: expected ./blade.yaml or ./blade directory with YAML files")
@@ -173,7 +189,6 @@ func main() {
 		}
 	}()
 
-	args := os.Args
 	if len(args) > 1 {
 
 		action := args[1]
