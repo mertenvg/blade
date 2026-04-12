@@ -43,6 +43,15 @@ blade run
 
 # run only selected services by name
 blade run service-one service-two
+
+# print the current version
+blade version
+
+# check if a newer version is available
+blade check-for-updates
+
+# update to the latest version
+blade update
 ```
 Blade reads configuration from `./blade.yaml` or `./.blade/*` in the current working directory. If arguments are provided, only the named services are run; otherwise, all non-skipped services are started.
 
@@ -145,6 +154,7 @@ go test ./...
 ```
 .
 ├── main.go                       # CLI entry point
+├── version.go                    # version, check-for-updates, update commands
 ├── internal/
 │   └── service/
 │       ├── service.go            # service lifecycle (start/restart/exit/status, env, output)
@@ -161,6 +171,12 @@ go test ./...
 └── LICENSE
 ```
 
+
+## Versioning
+The version is automatically embedded by Go when installed via `go install github.com/mertenvg/blade@<version>`. No hardcoded version exists in the source code. For custom builds, the version can be injected via ldflags:
+```bash
+go build -ldflags "-X main.version=v1.2.3" -o blade .
+```
 
 ## Scripts
 There are no external script runners (e.g., Makefile) in this repo. Useful Go commands:
