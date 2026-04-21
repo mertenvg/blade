@@ -92,7 +92,8 @@ Schema (inferred from code):
 - Service fields (`internal/service/service.go`):
   - `name` (string) — required
   - `run` (string) — required; shell command to start the service
-  - `before` (string) — optional; one-time command executed prior to first start
+  - `once` (string) — optional; command executed a single time before the service is started for the first time
+  - `before` (string) — optional; command executed every time before the service starts, including restarts triggered by the file watcher
   - `watch` (object) — optional; file watching config
     - `fs.path` (string) — single path to watch
     - `fs.paths` (array<string>) — multiple paths to watch

@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -193,6 +195,106 @@ func TestExit_StopsServiceWithoutWatcher(t *testing.T) {
 	case <-done:
 	case <-time.After(15 * time.Second):
 		t.Fatalf("service did not exit after Exit() call")
+	}
+}
+
+func TestInheritFrom_OnceAndBefore(t *testing.T) {
+	parent := &S{Once: "echo parent-once", Before: "echo parent-before"}
+
+	child := &S{}
+	child.InheritFrom(parent)
+	if child.Once != "echo parent-once" {
+		t.Errorf("child without Once should inherit from parent: got %q", child.Once)
+	}
+	if child.Before != "echo parent-before" {
+		t.Errorf("child without Before should inherit from parent: got %q", child.Before)
+	}
+}
+
+// TestStart_OnceRunsOnceAndBeforeRunsOnEachStart verifies the lifecycle:
+// `once` fires a single time prior to the first start, while `before` runs
+// every time the service starts — including after a watcher-triggered restart.
+func TestStart_OnceRunsOnceAndBeforeRunsOnEachStart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses unix sh")
+	}
+
+	dir := t.TempDir()
+	onceFile := filepath.Join(dir, "once.log")
+	beforeFile := filepath.Join(dir, "before.log")
+	onceScript := filepath.Join(dir, "once.sh")
+	beforeScript := filepath.Join(dir, "before.sh")
+
+	if err := os.WriteFile(onceScript, []byte(fmt.Sprintf("#!/bin/sh\necho o >> %s\n", onceFile)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beforeScript, []byte(fmt.Sprintf("#!/bin/sh\necho b >> %s\n", beforeFile)), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &S{
+		Name:       "svc",
+		Once:       "sh " + onceScript,
+		Before:     "sh " + beforeScript,
+		Run:        "sleep 30",
+		InheritEnv: true,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Start(ctx)
+
+	waitForLines := func(path string, want int, timeout time.Duration) bool {
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			b, _ := os.ReadFile(path)
+			if len(strings.TrimSpace(string(b))) > 0 {
+				lines := strings.Count(strings.TrimSpace(string(b)), "\n") + 1
+				if lines >= want {
+					return true
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return false
+	}
+
+	if !waitForLines(beforeFile, 1, 5*time.Second) {
+		t.Fatalf("before did not run before first start")
+	}
+	if !waitForLines(onceFile, 1, 5*time.Second) {
+		t.Fatalf("once did not run before first start")
+	}
+
+	// Two explicit restarts — each should re-run `before` but not `once`.
+	for i := 0; i < 2; i++ {
+		s.Restart()
+		if !waitForLines(beforeFile, i+2, 10*time.Second) {
+			t.Fatalf("before did not run after restart %d", i+1)
+		}
+	}
+
+	s.Exit()
+
+	done := make(chan struct{})
+	go func() { s.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatalf("service did not exit after Exit() call")
+	}
+
+	onceBytes, _ := os.ReadFile(onceFile)
+	onceLines := strings.Count(strings.TrimSpace(string(onceBytes)), "\n") + 1
+	if onceLines != 1 {
+		t.Errorf("expected `once` to run exactly once, got %d invocations: %q", onceLines, onceBytes)
+	}
+
+	beforeBytes, _ := os.ReadFile(beforeFile)
+	beforeLines := strings.Count(strings.TrimSpace(string(beforeBytes)), "\n") + 1
+	if beforeLines < 3 {
+		t.Errorf("expected `before` to run >=3 times (initial + 2 restarts), got %d: %q", beforeLines, beforeBytes)
 	}
 }
 
