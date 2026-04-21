@@ -59,6 +59,7 @@ type S struct {
 	Watch      *watcher.W `yaml:"watch"`
 	InheritEnv bool       `yaml:"inheritEnv"`
 	Env        []EnvValue `yaml:"env"`
+	Once       string     `yaml:"once"`
 	Before     string     `yaml:"before"`
 	Run        string     `yaml:"run"`
 	DNR        bool       `yaml:"dnr"`
@@ -70,8 +71,8 @@ type S struct {
 
 func (s *S) Start(ctx context.Context) {
 	colorterm.Info(s.Name, "starting")
-	if err := s.run(ctx, s.Before); err != nil {
-		fmt.Println(s.Name, "'before' cmd failed with error:", err)
+	if err := s.run(ctx, s.Once); err != nil {
+		fmt.Println(s.Name, "'once' cmd failed with error:", err)
 		return
 	}
 	s.restartCh = make(chan empty, 1)
@@ -142,6 +143,7 @@ func (s *S) InheritFrom(parent *S) {
 	s.Tags = append(parent.Tags, s.Tags...) // []string   `yaml:"tags"`
 	s.Env = append(parent.Env, s.Env...)    // []EnvValue `yaml:"env"`
 
+	s.Once = coalesce.String(parent.Once, s.Once)       // string     `yaml:"once"`
 	s.Before = coalesce.String(parent.Before, s.Before) // string     `yaml:"before"`
 	s.Run = coalesce.String(parent.Run, s.Run)          // string     `yaml:"run"`
 	s.Dir = coalesce.String(parent.Dir, s.Dir)          // string     `yaml:"dir"`
@@ -168,6 +170,24 @@ func (s *S) start(ctx context.Context, cmd string) error {
 		for {
 			if ctx.Err() != nil || s.DNR {
 				return
+			}
+
+			if err := s.run(ctx, s.Before); err != nil {
+				colorterm.Error(s.Name, "'before' cmd failed with error:", err)
+
+				if s.DNR || ctx.Err() != nil {
+					return
+				}
+
+				if s.backoff == 0 {
+					s.backoff = time.Second
+				}
+				if !sleepCtx(ctx, s.backoff) {
+					return
+				}
+				s.backoff *= 2
+
+				continue
 			}
 
 			cmdCtx, cmdCancel := context.WithCancel(ctx)
