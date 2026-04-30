@@ -198,6 +198,70 @@ func TestExit_StopsServiceWithoutWatcher(t *testing.T) {
 	}
 }
 
+// TestInheritFrom_ChildOverrideDoesNotLeakToParent verifies that when a child
+// service inherits an env var from a parent and overrides it, the override
+// does not leak back into the parent's Env slice — which would otherwise
+// corrupt other siblings inheriting from the same parent.
+//
+// The bug: `s.Env = append(parent.Env, s.Env...)` reuses parent.Env's backing
+// array when it has spare capacity (YAML-unmarshalled slices commonly do).
+// main.go then rewrites each entry's Value pointer (`s.Env[i].Value = &v`),
+// which writes into the shared array and mutates the parent in place.
+func TestInheritFrom_ChildOverrideDoesNotLeakToParent(t *testing.T) {
+	// Force spare capacity in the parent's Env slice so append reuses
+	// the same backing array — replicating the YAML-unmarshal scenario
+	// deterministically.
+	parentVal := "parent-default"
+	parent := &S{Name: "parent", Env: make([]EnvValue, 0, 4)}
+	parent.Env = append(parent.Env, EnvValue{Name: "VAR", Value: &parentVal})
+
+	childAVal := "childA-override"
+	childA := &S{
+		Name: "childA",
+		Env:  []EnvValue{{Name: "VAR", Value: &childAVal}},
+	}
+	childA.InheritFrom(parent)
+
+	// Mimic main.go's env resolution loop: rewrite each entry's Value
+	// pointer with the resolved (overridden) value. If childA.Env shares
+	// a backing array with parent.Env, this leaks into the parent.
+	for i := range childA.Env {
+		v := "childA-override"
+		childA.Env[i].Value = &v
+	}
+
+	if got := *parent.Env[0].Value; got != "parent-default" {
+		t.Fatalf("parent.Env was mutated by child's resolution: got %q, want %q", got, "parent-default")
+	}
+
+	// A second child inheriting from the same parent should still see
+	// the original parent default, not childA's override.
+	childB := &S{Name: "childB"}
+	childB.InheritFrom(parent)
+	if got := *childB.Env[0].Value; got != "parent-default" {
+		t.Fatalf("childB inherited corrupted parent value: got %q, want %q", got, "parent-default")
+	}
+}
+
+// TestInheritFrom_TagsDoNotLeakToParent verifies the same defensive-copy
+// guarantee for Tags — child mutations must not bleed into parent.Tags.
+func TestInheritFrom_TagsDoNotLeakToParent(t *testing.T) {
+	parent := &S{Name: "parent", Tags: make([]string, 0, 4)}
+	parent.Tags = append(parent.Tags, "shared")
+
+	child := &S{Name: "child", Tags: []string{"child-only"}}
+	child.InheritFrom(parent)
+
+	// Overwrite child.Tags entries — must not affect parent.Tags.
+	for i := range child.Tags {
+		child.Tags[i] = "mutated"
+	}
+
+	if len(parent.Tags) != 1 || parent.Tags[0] != "shared" {
+		t.Fatalf("parent.Tags was mutated by child: got %v, want [shared]", parent.Tags)
+	}
+}
+
 func TestInheritFrom_OnceAndBefore(t *testing.T) {
 	parent := &S{Once: "echo parent-once", Before: "echo parent-before"}
 
