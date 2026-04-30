@@ -140,8 +140,18 @@ func (s *S) Status() (bool, string, string) {
 }
 
 func (s *S) InheritFrom(parent *S) {
-	s.Tags = append(parent.Tags, s.Tags...) // []string   `yaml:"tags"`
-	s.Env = append(parent.Env, s.Env...)    // []EnvValue `yaml:"env"`
+	// Allocate fresh backing arrays so later mutations to s.Tags / s.Env
+	// (e.g. main.go rewriting Env[i].Value during interpolation) cannot
+	// leak back into parent and corrupt other siblings that inherit from it.
+	tags := make([]string, 0, len(parent.Tags)+len(s.Tags)) // []string   `yaml:"tags"`
+	tags = append(tags, parent.Tags...)
+	tags = append(tags, s.Tags...)
+	s.Tags = tags
+
+	env := make([]EnvValue, 0, len(parent.Env)+len(s.Env)) // []EnvValue `yaml:"env"`
+	env = append(env, parent.Env...)
+	env = append(env, s.Env...)
+	s.Env = env
 
 	s.Once = coalesce.String(parent.Once, s.Once)       // string     `yaml:"once"`
 	s.Before = coalesce.String(parent.Before, s.Before) // string     `yaml:"before"`
